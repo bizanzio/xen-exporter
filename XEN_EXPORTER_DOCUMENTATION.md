@@ -9,6 +9,8 @@
 6. [Key-Based Authentication - Feasibility Analysis](#6-key-based-authentication---feasibility-analysis)
 7. [Complete Metrics List](#7-complete-metrics-list)
 8. [Configuration Reference](#8-configuration-reference)
+9. [Planned Future Enhancements](#9-planned-future-enhancements)
+10. [Production Deployment Strategy](#10-production-deployment-strategy)
 
 ---
 
@@ -955,6 +957,404 @@ docker run -e XEN_USER=root \
            -p 9100:9100 \
            ghcr.io/mikedombo/xen-exporter:latest
 ```
+
+---
+
+## 9. Planned Future Enhancements
+
+### 9.1 Overview
+
+The current exporter focuses on RRD-based metrics which cover performance and resource utilization. However, certain infrastructure-level information is **NOT currently exported** but can be added with code modifications.
+
+### 9.2 Multipath Storage Metrics (Planned)
+
+**Current Status:** NOT SUPPORTED
+
+**What is Multipath?**
+Multipath I/O (MPIO) provides redundant paths to storage devices, improving availability and load balancing.
+
+**Planned Metrics:**
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `xen_host_multipath_enabled` | Gauge | Whether multipath is enabled on the host (1=enabled, 0=disabled) |
+| `xen_sr_multipath_active` | Gauge | Whether multipath is active for the SR (1=active, 0=inactive) |
+| `xen_sr_multipath_paths` | Gauge | Number of available paths to the storage |
+
+**Implementation Approach:**
+```python
+def collect_multipath_status(session: XenAPI.Session):
+    output = ""
+    hosts = session.xenapi.host.get_all_records()
+    for host_uuid, host_record in hosts.items():
+        host_name = host_record["name_label"]
+        # Check multipath in other_config
+        multipath_enabled = host_record.get("other_config", {}).get("multipathing", "false")
+        enabled_val = 1 if multipath_enabled.lower() == "true" else 0
+        output += f'xen_host_multipath_enabled{{host="{host_name}", host_uuid="{host_uuid}"}} {enabled_val}\n'
+
+    # Check SR multipath status via PBDs
+    pbds = session.xenapi.PBD.get_all_records()
+    for pbd_ref, pbd_record in pbds.items():
+        sr_ref = pbd_record["SR"]
+        sr_record = session.xenapi.SR.get_record(sr_ref)
+        sr_name = sr_record["name_label"]
+        sr_uuid = sr_record["uuid"]
+
+        # Check device_config for multipath info
+        device_config = pbd_record.get("device_config", {})
+        multipath_active = 1 if device_config.get("multipath", "false").lower() == "true" else 0
+        output += f'xen_sr_multipath_active{{sr="{sr_name}", sr_uuid="{sr_uuid}"}} {multipath_active}\n'
+
+    return output
+```
+
+**Labels:**
+| Label | Description |
+|-------|-------------|
+| `host` | Host name |
+| `host_uuid` | Host UUID |
+| `sr` | Storage Repository name |
+| `sr_uuid` | Storage Repository UUID |
+
+---
+
+### 9.3 Storage Server Status Metrics (Planned)
+
+**Current Status:** NOT SUPPORTED
+
+**What is Storage Server Status?**
+Information about backend storage targets (iSCSI, NFS, Fibre Channel) including connectivity and health.
+
+**Planned Metrics:**
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `xen_pbd_attached` | Gauge | PBD connection status (1=attached, 0=detached) |
+| `xen_sr_target_info` | Info | Storage target information (iSCSI target, NFS server, etc.) |
+| `xen_sr_connection_status` | Gauge | Overall SR connectivity (1=connected, 0=disconnected) |
+
+**Implementation Approach:**
+```python
+def collect_pbd_status(session: XenAPI.Session):
+    output = ""
+    pbd_records = session.xenapi.PBD.get_all_records()
+
+    for pbd_ref, pbd_record in pbd_records.items():
+        sr_ref = pbd_record["SR"]
+        host_ref = pbd_record["host"]
+
+        sr_record = session.xenapi.SR.get_record(sr_ref)
+        host_record = session.xenapi.host.get_record(host_ref)
+
+        sr_name = sr_record["name_label"]
+        sr_uuid = sr_record["uuid"]
+        sr_type = sr_record["type"]
+        host_name = host_record["name_label"]
+        host_uuid = host_record["uuid"]
+
+        attached = 1 if pbd_record["currently_attached"] else 0
+
+        output += f'xen_pbd_attached{{sr="{sr_name}", sr_uuid="{sr_uuid}", host="{host_name}", host_uuid="{host_uuid}", type="{sr_type}"}} {attached}\n'
+
+    return output
+
+def collect_storage_targets(session: XenAPI.Session):
+    output = ""
+    pbd_records = session.xenapi.PBD.get_all_records()
+
+    for pbd_ref, pbd_record in pbd_records.items():
+        sr_ref = pbd_record["SR"]
+        sr_record = session.xenapi.SR.get_record(sr_ref)
+        sr_name = sr_record["name_label"]
+        sr_uuid = sr_record["uuid"]
+        sr_type = sr_record["type"]
+
+        device_config = pbd_record.get("device_config", {})
+
+        # iSCSI targets
+        if sr_type == "lvmoiscsi" or sr_type == "iscsi":
+            target = device_config.get("target", "unknown")
+            target_iqn = device_config.get("targetIQN", "unknown")
+            output += f'xen_sr_iscsi_target_info{{sr="{sr_name}", sr_uuid="{sr_uuid}", target="{target}", iqn="{target_iqn}"}} 1\n'
+
+        # NFS targets
+        elif sr_type == "nfs" or sr_type == "iso":
+            server = device_config.get("server", "unknown")
+            server_path = device_config.get("serverpath", "unknown")
+            output += f'xen_sr_nfs_target_info{{sr="{sr_name}", sr_uuid="{sr_uuid}", server="{server}", path="{server_path}"}} 1\n'
+
+        # Fibre Channel
+        elif sr_type == "lvmohba":
+            scsi_id = device_config.get("SCSIid", "unknown")
+            output += f'xen_sr_fc_info{{sr="{sr_name}", sr_uuid="{sr_uuid}", scsi_id="{scsi_id}"}} 1\n'
+
+    return output
+```
+
+**Labels for PBD Metrics:**
+| Label | Description |
+|-------|-------------|
+| `sr` | Storage Repository name |
+| `sr_uuid` | Storage Repository UUID |
+| `host` | Host name |
+| `host_uuid` | Host UUID |
+| `type` | SR type (nfs, lvmoiscsi, lvm, etc.) |
+
+**Labels for Storage Target Metrics:**
+| Label | Description |
+|-------|-------------|
+| `sr` | Storage Repository name |
+| `sr_uuid` | Storage Repository UUID |
+| `target` | iSCSI target IP/hostname |
+| `iqn` | iSCSI target IQN |
+| `server` | NFS server IP/hostname |
+| `path` | NFS server path |
+| `scsi_id` | Fibre Channel SCSI ID |
+
+---
+
+### 9.4 Summary of Planned Enhancements
+
+| Feature | Priority | Complexity | XenAPI Calls Required |
+|---------|----------|------------|----------------------|
+| PBD Attachment Status | High | Low | `PBD.get_all_records()` |
+| Multipath Status | Medium | Medium | `host.get_all_records()`, `PBD.get_all_records()` |
+| iSCSI Target Info | Medium | Low | `PBD.get_all_records()`, `SR.get_record()` |
+| NFS Target Info | Medium | Low | `PBD.get_all_records()`, `SR.get_record()` |
+| Fibre Channel Info | Low | Low | `PBD.get_all_records()`, `SR.get_record()` |
+
+### 9.5 Why These Are Not Currently Implemented
+
+1. **RRD Focus:** The current exporter is designed to export RRD metrics which are performance-focused
+2. **Additional API Calls:** Each enhancement requires additional XenAPI calls, increasing scrape time
+3. **Use Case Specific:** Not all deployments use multipath or external storage targets
+
+### 9.6 Integration Point
+
+When implemented, these functions would be called from `collect_metrics()`:
+
+```python
+def collect_metrics():
+    # ... existing code ...
+
+    with Xen("https://" + xen_poolmaster, xen_user, xen_password, verify_ssl) as xen:
+        # ... existing RRD collection ...
+
+        output += collect_sr_usage(xen)
+
+        # Future enhancements (uncomment when implemented)
+        # output += collect_pbd_status(xen)
+        # output += collect_multipath_status(xen)
+        # output += collect_storage_targets(xen)
+
+        collector_end_time = time.perf_counter()
+        output += f"xen_collector_duration_seconds {collector_end_time - collector_start_time}\n"
+        return output
+```
+
+### 9.7 Expected New Metrics After Implementation
+
+| Metric | Description |
+|--------|-------------|
+| `xen_pbd_attached` | PBD attachment status per host/SR combination |
+| `xen_host_multipath_enabled` | Host-level multipath enablement |
+| `xen_sr_multipath_active` | SR-level multipath activation |
+| `xen_sr_iscsi_target_info` | iSCSI target connectivity information |
+| `xen_sr_nfs_target_info` | NFS target connectivity information |
+| `xen_sr_fc_info` | Fibre Channel storage information |
+
+---
+
+## 10. Production Deployment Strategy
+
+### 10.1 Ops Team Requirements
+
+The following requirements have been defined by the operations team:
+
+| # | Requirement | Status |
+|---|-------------|--------|
+| 1 | Host-level metrics with alerts for CPU, Memory, Disk I/O, Network Throughput | **Currently Available** |
+| 2 | Dom0 CPU and memory metrics only (exclude guest VMs and individual disks) | **Filter via Prometheus** |
+| 3 | Storage Repository (SR) utilization metrics (`xen_sr_physical_utilization`) | **Currently Available** |
+| 4 | Multipath monitoring with alerts for path failures | **Requires Code Change** |
+| 5 | PBD status monitoring with alerts for attach/detach/failures | **Requires Code Change** |
+
+### 10.2 Current Implementation Status
+
+#### Available Now (No Code Changes Required)
+
+| Requirement | Metrics | Implementation |
+|-------------|---------|----------------|
+| Host CPU | `xen_host_cpu`, `xen_host_cpu_avg`, `xen_host_loadavg` | RRD API |
+| Host Memory | `xen_host_memory_free_kib`, `xen_host_memory_total_kib` | RRD API |
+| Host Disk I/O | `xen_host_iops_*`, `xen_host_read*`, `xen_host_write*`, `xen_host_latency` | RRD API |
+| Host Network | `xen_host_pif_rx`, `xen_host_pif_tx` | RRD API |
+| SR Utilization | `xen_sr_physical_size`, `xen_sr_physical_utilization` | XenAPI |
+
+#### Requires Code Implementation
+
+| Requirement | Planned Metrics | Implementation Details |
+|-------------|-----------------|------------------------|
+| Multipath Monitoring | `xen_host_multipath_enabled`, `xen_sr_multipath_active`, `xen_sr_multipath_paths` | See Section 9.2 |
+| PBD Status | `xen_pbd_attached` | See Section 9.3 |
+
+### 10.3 Key Finding: Metric Filtering Does NOT Reduce Dom0 Load
+
+**Important Research Finding:**
+
+Filtering metrics does **NOT** reduce Dom0 load because:
+
+1. **Dom0's xcp-rrdd daemon** continuously collects ALL metrics regardless of queries
+2. **The RRD API** returns all metrics in a single bulk response (no server-side filtering)
+3. **Filtering happens on the client side** (Prometheus relabeling)
+
+**What Actually Reduces Dom0 Load:**
+| Action | Impact |
+|--------|--------|
+| Increase scrape interval (60s → 120s) | Halves query frequency |
+| Prometheus metric relabeling | Zero Dom0 impact (client-side only) |
+
+### 10.4 Metrics to Collect (Per Ops Requirements)
+
+#### KEEP - Dom0 Host Metrics
+
+| Category | Metrics | Purpose |
+|----------|---------|---------|
+| **CPU** | `xen_host_cpu`, `xen_host_cpu_avg`, `xen_host_loadavg` | CPU utilization and load |
+| **Memory** | `xen_host_memory_free_kib`, `xen_host_memory_total_kib` | Memory utilization |
+| **Disk I/O** | `xen_host_iops_read`, `xen_host_iops_write`, `xen_host_iops_total` | Disk IOPS |
+| **Disk I/O** | `xen_host_io_throughput_read`, `xen_host_io_throughput_write` | Disk throughput |
+| **Disk I/O** | `xen_host_latency`, `xen_host_read_latency`, `xen_host_write_latency` | Disk latency |
+| **Network** | `xen_host_pif_rx`, `xen_host_pif_tx` | Network throughput |
+
+#### KEEP - Storage Repository Metrics
+
+| Metric | Purpose |
+|--------|---------|
+| `xen_sr_physical_size` | Total SR capacity |
+| `xen_sr_physical_utilization` | Used SR space |
+| `xen_sr_virtual_allocation` | Virtual allocation (thin provisioning) |
+
+#### EXCLUDE - Guest VM Metrics
+
+| Category | Metrics | Reason |
+|----------|---------|--------|
+| VM CPU | `xen_vm_cpu` | Guest-level not required |
+| VM Memory | `xen_vm_memory`, `xen_vm_memory_*` | Guest-level not required |
+| VM Disk | `xen_vm_vbd_*` | Individual disk metrics not required |
+| VM Network | `xen_vm_vif_*` | Guest-level not required |
+
+#### PLANNED - Future Metrics (Require Code Changes)
+
+| Metric | Purpose | Alert Condition |
+|--------|---------|-----------------|
+| `xen_pbd_attached` | PBD connection status | Alert when `== 0` (detached/failed) |
+| `xen_host_multipath_enabled` | Host multipath config | Alert when `== 0` (disabled) |
+| `xen_sr_multipath_active` | SR multipath status | Alert when `== 0` (inactive) |
+| `xen_sr_multipath_paths` | Path count | Alert when paths reduced |
+
+### 10.5 Prometheus Configuration
+
+#### Scrape Configuration
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: xenserver
+    scrape_interval: 60s
+    scrape_timeout: 50s
+    static_configs:
+      - targets:
+        - xen-exporter:9100
+```
+
+#### Metric Relabeling (Filter Per Ops Requirements)
+```yaml
+# prometheus.yml - Add to scrape_configs
+    metric_relabel_configs:
+      # KEEP: Host CPU metrics
+      - source_labels: [__name__]
+        regex: 'xen_host_(cpu|cpu_avg|loadavg).*'
+        action: keep
+
+      # KEEP: Host Memory metrics
+      - source_labels: [__name__]
+        regex: 'xen_host_memory_(free|total)_kib'
+        action: keep
+
+      # KEEP: Host Disk I/O metrics
+      - source_labels: [__name__]
+        regex: 'xen_host_(iops|io_throughput|latency|read_latency|write_latency|read|write).*'
+        action: keep
+
+      # KEEP: Host Network metrics
+      - source_labels: [__name__]
+        regex: 'xen_host_pif_(rx|tx)'
+        action: keep
+
+      # KEEP: SR utilization metrics
+      - source_labels: [__name__]
+        regex: 'xen_sr_(physical_size|physical_utilization|virtual_allocation)'
+        action: keep
+
+      # KEEP: Collector health metric
+      - source_labels: [__name__]
+        regex: 'xen_collector_duration_seconds'
+        action: keep
+
+      # FUTURE: PBD and Multipath (uncomment when implemented)
+      # - source_labels: [__name__]
+      #   regex: 'xen_(pbd_attached|host_multipath_enabled|sr_multipath_active|sr_multipath_paths)'
+      #   action: keep
+
+      # DROP: Everything else (VM metrics, etc.)
+      - source_labels: [__name__]
+        regex: 'xen_vm_.*'
+        action: drop
+```
+
+### 10.6 Alerting Thresholds (Configure in Grafana)
+
+#### Currently Available Alerts
+
+| Alert | PromQL Expression | Threshold | Severity |
+|-------|-------------------|-----------|----------|
+| Host High CPU | `xen_host_cpu_avg` | > 90% for 5m | Warning |
+| Host Low Memory | `xen_host_memory_free_kib / xen_host_memory_total_kib` | < 10% for 5m | Critical |
+| Host High Disk Latency | `xen_host_latency` | > 50ms for 5m | Warning |
+| Host High Disk IOPS | `xen_host_iops_total` | > 10000 for 5m | Warning |
+| SR High Utilization | `xen_sr_physical_utilization / xen_sr_physical_size` | > 85% for 10m | Warning |
+| SR Critical | `xen_sr_physical_utilization / xen_sr_physical_size` | > 95% for 5m | Critical |
+
+#### Planned Alerts (After Code Implementation)
+
+| Alert | PromQL Expression | Threshold | Severity |
+|-------|-------------------|-----------|----------|
+| PBD Detached | `xen_pbd_attached == 0` | for 1m | Critical |
+| PBD Failure | `changes(xen_pbd_attached[5m]) > 0` | - | Warning |
+| Multipath Disabled | `xen_host_multipath_enabled == 0` | for 5m | Warning |
+| Multipath Path Loss | `xen_sr_multipath_paths < 2` | for 1m | Critical |
+
+### 10.7 Implementation Roadmap
+
+| Phase | Deliverable | Status |
+|-------|-------------|--------|
+| **Phase 1** | Deploy exporter with current metrics | Ready |
+| **Phase 2** | Configure Prometheus relabeling (exclude VM metrics) | Ready |
+| **Phase 3** | Configure Grafana alerts for available metrics | Ready |
+| **Phase 4** | Implement PBD status monitoring (code change) | Documented (Section 9.3) |
+| **Phase 5** | Implement multipath monitoring (code change) | Documented (Section 9.2) |
+| **Phase 6** | Configure Grafana alerts for PBD/multipath | After Phase 4-5 |
+
+### 10.8 Performance Expectations
+
+| Metric | Expected Value |
+|--------|----------------|
+| Scrape interval | 60 seconds |
+| Collection duration (current) | 800-1500ms |
+| Collection duration (with PBD/multipath) | 900-1750ms |
+| Dom0 CPU impact per scrape | 1-3% |
+| Network bandwidth per scrape | 50-200 KB |
 
 ---
 
