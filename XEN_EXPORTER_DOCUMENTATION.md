@@ -10,7 +10,6 @@
 7. [Complete Metrics List](#7-complete-metrics-list)
 8. [Configuration Reference](#8-configuration-reference)
 9. [Planned Future Enhancements](#9-planned-future-enhancements)
-10. [Production Deployment Strategy](#10-production-deployment-strategy)
 
 ---
 
@@ -964,11 +963,13 @@ docker run -e XEN_USER=root \
 
 ### 9.1 Overview
 
-The current exporter focuses on RRD-based metrics which cover performance and resource utilization. However, certain infrastructure-level information is **NOT currently exported** but can be added with code modifications.
+The current exporter focuses on RRD-based metrics which cover performance and resource utilization. The following infrastructure-level metrics have been implemented.
 
-### 9.2 Multipath Storage Metrics (Planned)
+### 9.2 Multipath Storage Metrics
 
-**Current Status:** NOT SUPPORTED
+**Current Status:** IMPLEMENTED
+
+**Environment Variable:** `XEN_COLLECT_MULTIPATH` (default: `true`)
 
 **What is Multipath?**
 Multipath I/O (MPIO) provides redundant paths to storage devices, improving availability and load balancing.
@@ -1019,20 +1020,35 @@ def collect_multipath_status(session: XenAPI.Session):
 
 ---
 
-### 9.3 Storage Server Status Metrics (Planned)
+### 9.3 PBD Status Metrics
 
-**Current Status:** NOT SUPPORTED
+**Current Status:** IMPLEMENTED
 
-**What is Storage Server Status?**
-Information about backend storage targets (iSCSI, NFS, Fibre Channel) including connectivity and health.
+**Environment Variable:** `XEN_COLLECT_PBD` (default: `true`)
+
+**What is PBD Status?**
+PBD (Physical Block Device) represents the connection between a host and a storage repository. Monitoring PBD status allows detection of storage disconnections.
+
+**Implemented Metrics:**
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `xen_pbd_attached` | Gauge | PBD connection status (1=attached, 0=detached) |
+
+### 9.4 Storage Target Information Metrics (Planned)
+
+**Current Status:** NOT YET IMPLEMENTED
+
+**What is Storage Target Info?**
+Information about backend storage targets (iSCSI, NFS, Fibre Channel) including connectivity details.
 
 **Planned Metrics:**
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `xen_pbd_attached` | Gauge | PBD connection status (1=attached, 0=detached) |
-| `xen_sr_target_info` | Info | Storage target information (iSCSI target, NFS server, etc.) |
-| `xen_sr_connection_status` | Gauge | Overall SR connectivity (1=connected, 0=disconnected) |
+| `xen_sr_iscsi_target_info` | Info | iSCSI target connectivity information |
+| `xen_sr_nfs_target_info` | Info | NFS target connectivity information |
+| `xen_sr_fc_info` | Info | Fibre Channel storage information |
 
 **Implementation Approach:**
 ```python
@@ -1168,193 +1184,209 @@ def collect_metrics():
 
 ## 10. Production Deployment Strategy
 
-### 10.1 Ops Team Requirements
+### 10.1 Overview
 
-The following requirements have been defined by the operations team:
+This section documents the recommended production deployment strategy focusing on essential metrics while minimizing Dom0 overhead.
 
-| # | Requirement | Status |
-|---|-------------|--------|
-| 1 | Host-level metrics with alerts for CPU, Memory, Disk I/O, Network Throughput | **Currently Available** |
-| 2 | Dom0 CPU and memory metrics only (exclude guest VMs and individual disks) | **Filter via Prometheus** |
-| 3 | Storage Repository (SR) utilization metrics (`xen_sr_physical_utilization`) | **Currently Available** |
-| 4 | Multipath monitoring with alerts for path failures | **Requires Code Change** |
-| 5 | PBD status monitoring with alerts for attach/detach/failures | **Requires Code Change** |
-
-### 10.2 Current Implementation Status
-
-#### Available Now (No Code Changes Required)
-
-| Requirement | Metrics | Implementation |
-|-------------|---------|----------------|
-| Host CPU | `xen_host_cpu`, `xen_host_cpu_avg`, `xen_host_loadavg` | RRD API |
-| Host Memory | `xen_host_memory_free_kib`, `xen_host_memory_total_kib` | RRD API |
-| Host Disk I/O | `xen_host_iops_*`, `xen_host_read*`, `xen_host_write*`, `xen_host_latency` | RRD API |
-| Host Network | `xen_host_pif_rx`, `xen_host_pif_tx` | RRD API |
-| SR Utilization | `xen_sr_physical_size`, `xen_sr_physical_utilization` | XenAPI |
-
-#### Requires Code Implementation
-
-| Requirement | Planned Metrics | Implementation Details |
-|-------------|-----------------|------------------------|
-| Multipath Monitoring | `xen_host_multipath_enabled`, `xen_sr_multipath_active`, `xen_sr_multipath_paths` | See Section 9.2 |
-| PBD Status | `xen_pbd_attached` | See Section 9.3 |
-
-### 10.3 Key Finding: Metric Filtering Does NOT Reduce Dom0 Load
+### 10.2 Key Finding: Metric Filtering Does NOT Reduce Dom0 Load
 
 **Important Research Finding:**
 
-Filtering metrics does **NOT** reduce Dom0 load because:
+Removing metrics from the exporter output does **NOT** reduce Dom0 load because:
 
-1. **Dom0's xcp-rrdd daemon** continuously collects ALL metrics regardless of queries
+1. **Dom0's xcp-rrdd daemon** continuously collects ALL metrics regardless of whether they're queried
 2. **The RRD API** returns all metrics in a single bulk response (no server-side filtering)
-3. **Filtering happens on the client side** (Prometheus relabeling)
+3. **Filtering happens on the client side** (exporter or Prometheus), not on Dom0
 
 **What Actually Reduces Dom0 Load:**
 | Action | Impact |
 |--------|--------|
 | Increase scrape interval (60s → 120s) | Halves query frequency |
-| Prometheus metric relabeling | Zero Dom0 impact (client-side only) |
+| Prometheus metric relabeling | Zero Dom0 impact (client-side) |
+| Not running exporter | Eliminates query overhead entirely |
 
-### 10.4 Metrics to Collect (Per Ops Requirements)
+### 10.3 Recommended Production Metrics
 
-#### KEEP - Dom0 Host Metrics
+Based on production requirements, the following metrics are recommended:
 
-| Category | Metrics | Purpose |
-|----------|---------|---------|
-| **CPU** | `xen_host_cpu`, `xen_host_cpu_avg`, `xen_host_loadavg` | CPU utilization and load |
-| **Memory** | `xen_host_memory_free_kib`, `xen_host_memory_total_kib` | Memory utilization |
-| **Disk I/O** | `xen_host_iops_read`, `xen_host_iops_write`, `xen_host_iops_total` | Disk IOPS |
-| **Disk I/O** | `xen_host_io_throughput_read`, `xen_host_io_throughput_write` | Disk throughput |
-| **Disk I/O** | `xen_host_latency`, `xen_host_read_latency`, `xen_host_write_latency` | Disk latency |
-| **Network** | `xen_host_pif_rx`, `xen_host_pif_tx` | Network throughput |
+#### Essential Metrics (KEEP)
 
-#### KEEP - Storage Repository Metrics
+| Category | Metrics | Alert Threshold |
+|----------|---------|-----------------|
+| **Host CPU** | `xen_host_cpu`, `xen_host_cpu_avg`, `xen_host_loadavg` | CPU > 90% for 5m |
+| **Host Memory** | `xen_host_memory_free_kib`, `xen_host_memory_total_kib` | Free < 10% for 5m |
+| **SR Utilization** | `xen_sr_physical_size`, `xen_sr_physical_utilization` | Utilization > 85% |
+| **Collector Health** | `xen_collector_duration_seconds` | Duration > 30s |
 
-| Metric | Purpose |
-|--------|---------|
-| `xen_sr_physical_size` | Total SR capacity |
-| `xen_sr_physical_utilization` | Used SR space |
-| `xen_sr_virtual_allocation` | Virtual allocation (thin provisioning) |
-
-#### EXCLUDE - Guest VM Metrics
+#### Excluded Metrics (Per Production Requirements)
 
 | Category | Metrics | Reason |
 |----------|---------|--------|
-| VM CPU | `xen_vm_cpu` | Guest-level not required |
-| VM Memory | `xen_vm_memory`, `xen_vm_memory_*` | Guest-level not required |
-| VM Disk | `xen_vm_vbd_*` | Individual disk metrics not required |
-| VM Network | `xen_vm_vif_*` | Guest-level not required |
+| VM Metrics | `xen_vm_*` | Guest-level monitoring not required |
+| Individual Disk I/O | `xen_host_iops_*`, `xen_host_read*`, `xen_host_write*` | Excluded per requirements |
+| Network Throughput | `xen_host_pif_*` | Excluded per requirements |
 
-#### PLANNED - Future Metrics (Require Code Changes)
-
-| Metric | Purpose | Alert Condition |
-|--------|---------|-----------------|
-| `xen_pbd_attached` | PBD connection status | Alert when `== 0` (detached/failed) |
-| `xen_host_multipath_enabled` | Host multipath config | Alert when `== 0` (disabled) |
-| `xen_sr_multipath_active` | SR multipath status | Alert when `== 0` (inactive) |
-| `xen_sr_multipath_paths` | Path count | Alert when paths reduced |
-
-### 10.5 Prometheus Configuration
+### 10.4 Prometheus Configuration for Production
 
 #### Scrape Configuration
 ```yaml
 # prometheus.yml
 scrape_configs:
   - job_name: xenserver
-    scrape_interval: 60s
-    scrape_timeout: 50s
+    scrape_interval: 60s      # Recommended interval
+    scrape_timeout: 50s       # Allow time for collection
     static_configs:
       - targets:
         - xen-exporter:9100
 ```
 
-#### Metric Relabeling (Filter Per Ops Requirements)
+#### Metric Relabeling (Filter to Essential Metrics)
 ```yaml
 # prometheus.yml - Add to scrape_configs
     metric_relabel_configs:
-      # KEEP: Host CPU metrics
+      # Keep host CPU metrics
       - source_labels: [__name__]
-        regex: 'xen_host_(cpu|cpu_avg|loadavg).*'
+        regex: 'xen_host_cpu.*'
         action: keep
 
-      # KEEP: Host Memory metrics
+      # Keep host memory metrics
       - source_labels: [__name__]
         regex: 'xen_host_memory_(free|total)_kib'
         action: keep
 
-      # KEEP: Host Disk I/O metrics
+      # Keep host load average
       - source_labels: [__name__]
-        regex: 'xen_host_(iops|io_throughput|latency|read_latency|write_latency|read|write).*'
+        regex: 'xen_host_loadavg'
         action: keep
 
-      # KEEP: Host Network metrics
+      # Keep SR metrics
       - source_labels: [__name__]
-        regex: 'xen_host_pif_(rx|tx)'
+        regex: 'xen_sr_(physical_size|physical_utilization)'
         action: keep
 
-      # KEEP: SR utilization metrics
-      - source_labels: [__name__]
-        regex: 'xen_sr_(physical_size|physical_utilization|virtual_allocation)'
-        action: keep
-
-      # KEEP: Collector health metric
+      # Keep collector duration
       - source_labels: [__name__]
         regex: 'xen_collector_duration_seconds'
         action: keep
 
-      # FUTURE: PBD and Multipath (uncomment when implemented)
+      # Future: Keep PBD/Multipath (uncomment when implemented)
       # - source_labels: [__name__]
-      #   regex: 'xen_(pbd_attached|host_multipath_enabled|sr_multipath_active|sr_multipath_paths)'
+      #   regex: 'xen_(pbd_attached|host_multipath_enabled|sr_multipath_active)'
       #   action: keep
-
-      # DROP: Everything else (VM metrics, etc.)
-      - source_labels: [__name__]
-        regex: 'xen_vm_.*'
-        action: drop
 ```
 
-### 10.6 Alerting Thresholds (Configure in Grafana)
+### 10.5 Production Alerting Rules
 
-#### Currently Available Alerts
+```yaml
+# alerting_rules.yml
+groups:
+  - name: xen-production-alerts
+    rules:
+      # Host CPU Alert
+      - alert: XenHostHighCPU
+        expr: xen_host_cpu_avg > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ $labels.host }}"
+          description: "CPU utilization is {{ $value | humanizePercentage }} on host {{ $labels.host }}"
 
-| Alert | PromQL Expression | Threshold | Severity |
-|-------|-------------------|-----------|----------|
-| Host High CPU | `xen_host_cpu_avg` | > 90% for 5m | Warning |
-| Host Low Memory | `xen_host_memory_free_kib / xen_host_memory_total_kib` | < 10% for 5m | Critical |
-| Host High Disk Latency | `xen_host_latency` | > 50ms for 5m | Warning |
-| Host High Disk IOPS | `xen_host_iops_total` | > 10000 for 5m | Warning |
-| SR High Utilization | `xen_sr_physical_utilization / xen_sr_physical_size` | > 85% for 10m | Warning |
-| SR Critical | `xen_sr_physical_utilization / xen_sr_physical_size` | > 95% for 5m | Critical |
+      # Host Memory Alert
+      - alert: XenHostLowMemory
+        expr: (xen_host_memory_free_kib / xen_host_memory_total_kib) < 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Low memory on {{ $labels.host }}"
+          description: "Only {{ $value | humanizePercentage }} memory free on host {{ $labels.host }}"
 
-#### Planned Alerts (After Code Implementation)
+      # SR Warning Alert (85%)
+      - alert: XenSRHighUtilization
+        expr: (xen_sr_physical_utilization / xen_sr_physical_size) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SR {{ $labels.sr }} above 85% utilization"
+          description: "Storage Repository {{ $labels.sr }} is {{ $value | humanizePercentage }} full"
 
-| Alert | PromQL Expression | Threshold | Severity |
-|-------|-------------------|-----------|----------|
-| PBD Detached | `xen_pbd_attached == 0` | for 1m | Critical |
-| PBD Failure | `changes(xen_pbd_attached[5m]) > 0` | - | Warning |
-| Multipath Disabled | `xen_host_multipath_enabled == 0` | for 5m | Warning |
-| Multipath Path Loss | `xen_sr_multipath_paths < 2` | for 1m | Critical |
+      # SR Critical Alert (95%)
+      - alert: XenSRCritical
+        expr: (xen_sr_physical_utilization / xen_sr_physical_size) > 0.95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "SR {{ $labels.sr }} critically full"
+          description: "Storage Repository {{ $labels.sr }} is {{ $value | humanizePercentage }} full - immediate action required"
 
-### 10.7 Implementation Roadmap
+      # Collector Health Alert
+      - alert: XenCollectorSlow
+        expr: xen_collector_duration_seconds > 30
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Xen exporter collection is slow"
+          description: "Metric collection took {{ $value | humanizeDuration }}"
 
-| Phase | Deliverable | Status |
-|-------|-------------|--------|
-| **Phase 1** | Deploy exporter with current metrics | Ready |
-| **Phase 2** | Configure Prometheus relabeling (exclude VM metrics) | Ready |
-| **Phase 3** | Configure Grafana alerts for available metrics | Ready |
-| **Phase 4** | Implement PBD status monitoring (code change) | Documented (Section 9.3) |
-| **Phase 5** | Implement multipath monitoring (code change) | Documented (Section 9.2) |
-| **Phase 6** | Configure Grafana alerts for PBD/multipath | After Phase 4-5 |
+      # PLANNED: PBD Detached Alert (uncomment when implemented)
+      # - alert: XenPBDDetached
+      #   expr: xen_pbd_attached == 0
+      #   for: 1m
+      #   labels:
+      #     severity: critical
+      #   annotations:
+      #     summary: "Storage disconnected on {{ $labels.host }}"
+      #     description: "SR {{ $labels.sr }} is detached from host {{ $labels.host }}"
 
-### 10.8 Performance Expectations
+      # PLANNED: Multipath Alert (uncomment when implemented)
+      # - alert: XenMultipathDisabled
+      #   expr: xen_host_multipath_enabled == 0
+      #   for: 5m
+      #   labels:
+      #     severity: warning
+      #   annotations:
+      #     summary: "Multipath disabled on {{ $labels.host }}"
+      #     description: "Host {{ $labels.host }} does not have multipath enabled"
+```
+
+### 10.6 Production Deployment Checklist
+
+| Step | Action | Status |
+|------|--------|--------|
+| 1 | Create dedicated read-only XenServer user | Pending |
+| 2 | Deploy xen-exporter with SSL verification enabled | Pending |
+| 3 | Configure Prometheus with 60s scrape interval | Pending |
+| 4 | Apply metric relabeling to filter essential metrics | Pending |
+| 5 | Import alerting rules | Pending |
+| 6 | Test SR >85% alert with test data | Pending |
+| 7 | Verify collector duration is < 30s | Pending |
+| 8 | Document PBD/Multipath for future implementation | Complete |
+
+### 10.7 Performance Expectations
 
 | Metric | Expected Value |
 |--------|----------------|
 | Scrape interval | 60 seconds |
-| Collection duration (current) | 800-1500ms |
-| Collection duration (with PBD/multipath) | 900-1750ms |
+| Collection duration | 800-1500ms |
 | Dom0 CPU impact per scrape | 1-3% |
 | Network bandwidth per scrape | 50-200 KB |
+| Prometheus storage (30 days) | ~50-100 MB per host |
+
+### 10.8 Future Enhancements (Documented for Implementation)
+
+The following features are documented and ready for implementation when required:
+
+| Feature | Section Reference | Priority |
+|---------|-------------------|----------|
+| PBD Status Monitoring | Section 9.3 | High |
+| Multipath Monitoring | Section 9.2 | Medium |
+| Storage Target Info | Section 9.3 | Medium |
+
+**Implementation Note:** When PBD and multipath monitoring are implemented, update the Prometheus metric relabeling and alerting rules by uncommenting the relevant sections in 10.4 and 10.5.
 
 ---
 

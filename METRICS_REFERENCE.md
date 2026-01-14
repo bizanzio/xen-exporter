@@ -161,43 +161,72 @@ This document provides a complete reference of all metrics exported by xen-expor
 
 ---
 
-## 3. Planned Future Metrics
+## 3. PBD and Multipath Metrics (Implemented)
 
-The following metrics are planned for future implementation to provide enhanced storage monitoring capabilities.
+The following metrics have been implemented to provide enhanced storage monitoring capabilities.
 
-### 3.1 Multipath Metrics (Planned)
+### 3.1 Multipath Metrics
 
-**Status:** NOT YET IMPLEMENTED
+**Status:** IMPLEMENTED
+
+**Environment Variable:** `XEN_COLLECT_MULTIPATH` (default: `true`)
 
 | Metric | Type | Unit | Description |
 |--------|------|------|-------------|
 | `xen_host_multipath_enabled` | Gauge | Boolean (0/1) | Whether multipath is enabled on the host |
 | `xen_sr_multipath_active` | Gauge | Boolean (0/1) | Whether multipath is active for the SR |
-| `xen_sr_multipath_paths` | Gauge | Count | Number of available paths to storage |
+
+**Labels:**
+| Label | Description |
+|-------|-------------|
+| `host` | Host name (for host metrics) |
+| `host_uuid` | Host UUID (for host metrics) |
+| `sr` | Storage Repository name (for SR metrics) |
+| `sr_uuid` | Storage Repository UUID (for SR metrics) |
 
 **Use Cases:**
 - Monitor multipath failover status
-- Alert when paths are reduced
+- Alert when multipath is disabled
 - Track multipath configuration across pool
 
-**Implementation Priority:** Medium
+**Example Alert:**
+```promql
+xen_host_multipath_enabled == 0  # Alert when multipath disabled
+xen_sr_multipath_active == 0     # Alert when SR multipath inactive
+```
 
 ---
 
-### 3.2 PBD (Physical Block Device) Metrics (Planned)
+### 3.2 PBD (Physical Block Device) Metrics
 
-**Status:** NOT YET IMPLEMENTED
+**Status:** IMPLEMENTED
+
+**Environment Variable:** `XEN_COLLECT_PBD` (default: `true`)
 
 | Metric | Type | Unit | Description |
 |--------|------|------|-------------|
 | `xen_pbd_attached` | Gauge | Boolean (0/1) | PBD connection status (1=attached, 0=detached) |
+
+**Labels:**
+| Label | Description |
+|-------|-------------|
+| `sr` | Storage Repository name |
+| `sr_uuid` | Storage Repository UUID |
+| `host` | Host name |
+| `host_uuid` | Host UUID |
+| `type` | SR type (nfs, lvmoiscsi, lvm, etc.) |
 
 **Use Cases:**
 - Detect storage disconnections immediately
 - Monitor SR availability per host
 - Alert on PBD detachment events
 
-**Implementation Priority:** High
+**Example Alert:**
+```promql
+xen_pbd_attached == 0  # Alert when PBD detached (critical)
+```
+
+**Implementation Priority:** High - DONE
 
 ---
 
@@ -235,17 +264,16 @@ The following metrics are planned for future implementation to provide enhanced 
 
 ---
 
-### 3.4 Summary: Planned vs Current Metrics
+### 3.4 Summary: Implementation Status
 
-| Category | Metric | Current | Planned |
-|----------|--------|---------|---------|
-| **Multipath** | `xen_host_multipath_enabled` | - | Yes |
-| **Multipath** | `xen_sr_multipath_active` | - | Yes |
-| **Multipath** | `xen_sr_multipath_paths` | - | Yes |
-| **PBD** | `xen_pbd_attached` | - | Yes |
-| **iSCSI** | `xen_sr_iscsi_target_info` | - | Yes |
-| **NFS** | `xen_sr_nfs_target_info` | - | Yes |
-| **FC** | `xen_sr_fc_info` | - | Yes |
+| Category | Metric | Status | Env Variable |
+|----------|--------|--------|--------------|
+| **Multipath** | `xen_host_multipath_enabled` | IMPLEMENTED | `XEN_COLLECT_MULTIPATH` |
+| **Multipath** | `xen_sr_multipath_active` | IMPLEMENTED | `XEN_COLLECT_MULTIPATH` |
+| **PBD** | `xen_pbd_attached` | IMPLEMENTED | `XEN_COLLECT_PBD` |
+| **iSCSI** | `xen_sr_iscsi_target_info` | Planned | - |
+| **NFS** | `xen_sr_nfs_target_info` | Planned | - |
+| **FC** | `xen_sr_fc_info` | Planned | - |
 
 ---
 

@@ -108,6 +108,123 @@ def collect_sr_usage(session: XenAPI.Session):
     return output
 
 
+def collect_pbd_status(session: XenAPI.Session):
+    """
+    Collect PBD (Physical Block Device) attachment status metrics.
+    Returns metrics indicating whether each PBD is currently attached (1) or detached (0).
+    """
+    output = ""
+    try:
+        pbd_records = session.xenapi.PBD.get_all_records()
+        sr_cache = {}
+        host_cache = {}
+
+        for pbd_ref, pbd_record in pbd_records.items():
+            try:
+                sr_ref = pbd_record.get("SR")
+                host_ref = pbd_record.get("host")
+
+                if not sr_ref or not host_ref:
+                    continue
+
+                # Cache SR record to avoid repeated API calls
+                if sr_ref not in sr_cache:
+                    sr_cache[sr_ref] = session.xenapi.SR.get_record(sr_ref)
+                sr_record = sr_cache[sr_ref]
+
+                # Cache host record to avoid repeated API calls
+                if host_ref not in host_cache:
+                    host_cache[host_ref] = session.xenapi.host.get_record(host_ref)
+                host_record = host_cache[host_ref]
+
+                sr_name = sr_record.get("name_label", "unknown")
+                sr_uuid = sr_record.get("uuid", "unknown")
+                sr_type = sr_record.get("type", "unknown")
+                host_name = host_record.get("name_label", "unknown")
+                host_uuid = host_record.get("uuid", "unknown")
+
+                attached = 1 if pbd_record.get("currently_attached", False) else 0
+
+                output += f'xen_pbd_attached{{sr="{sr_name}", sr_uuid="{sr_uuid}", host="{host_name}", host_uuid="{host_uuid}", type="{sr_type}"}} {attached}\n'
+
+            except Exception:
+                # Skip this PBD if there's an error, continue with others
+                continue
+
+    except Exception:
+        # If we can't get PBD records at all, return empty string
+        # This ensures the exporter continues working even if PBD API fails
+        pass
+
+    return output
+
+
+def collect_multipath_status(session: XenAPI.Session):
+    """
+    Collect multipath status metrics for hosts and SRs.
+    Returns metrics indicating multipath enablement on hosts and activation on SRs.
+    """
+    output = ""
+    try:
+        # Collect host-level multipath status
+        host_records = session.xenapi.host.get_all_records()
+        for host_ref, host_record in host_records.items():
+            try:
+                host_name = host_record.get("name_label", "unknown")
+                host_uuid = host_record.get("uuid", "unknown")
+
+                # Check multipath in other_config
+                other_config = host_record.get("other_config", {})
+                multipath_enabled = other_config.get("multipathing", "false")
+                enabled_val = 1 if str(multipath_enabled).lower() == "true" else 0
+
+                output += f'xen_host_multipath_enabled{{host="{host_name}", host_uuid="{host_uuid}"}} {enabled_val}\n'
+
+            except Exception:
+                continue
+
+        # Collect SR-level multipath status via PBDs
+        pbd_records = session.xenapi.PBD.get_all_records()
+        sr_cache = {}
+        sr_multipath_seen = set()
+
+        for pbd_ref, pbd_record in pbd_records.items():
+            try:
+                sr_ref = pbd_record.get("SR")
+                if not sr_ref:
+                    continue
+
+                # Cache SR record
+                if sr_ref not in sr_cache:
+                    sr_cache[sr_ref] = session.xenapi.SR.get_record(sr_ref)
+                sr_record = sr_cache[sr_ref]
+
+                sr_name = sr_record.get("name_label", "unknown")
+                sr_uuid = sr_record.get("uuid", "unknown")
+
+                # Only emit one metric per SR (not per PBD)
+                if sr_uuid in sr_multipath_seen:
+                    continue
+                sr_multipath_seen.add(sr_uuid)
+
+                # Check device_config for multipath info
+                device_config = pbd_record.get("device_config", {})
+                multipath_val = device_config.get("multipath", "false")
+                multipath_active = 1 if str(multipath_val).lower() == "true" else 0
+
+                output += f'xen_sr_multipath_active{{sr="{sr_name}", sr_uuid="{sr_uuid}"}} {multipath_active}\n'
+
+            except Exception:
+                continue
+
+    except Exception:
+        # If we can't get records, return empty string
+        # This ensures the exporter continues working even if API fails
+        pass
+
+    return output
+
+
 class Xen:
     def __init__(self, url, username, password, verify_ssl):
         self.session = XenAPI.Session(url, ignore_ssl=not verify_ssl)
@@ -153,6 +270,13 @@ def collect_metrics():
 
     halt_on_no_uuid = os.getenv("HALT_ON_NO_UUID", "false")
     halt_on_no_uuid = True if halt_on_no_uuid.lower() == "true" else False
+
+    # Enable/disable PBD and multipath metrics collection (enabled by default)
+    collect_pbd = os.getenv("XEN_COLLECT_PBD", "true")
+    collect_pbd = True if collect_pbd.lower() == "true" else False
+
+    collect_multipath = os.getenv("XEN_COLLECT_MULTIPATH", "true")
+    collect_multipath = True if collect_multipath.lower() == "true" else False
 
     collector_start_time = time.perf_counter()
     xen_poolmaster = collect_poolmaster(
@@ -257,6 +381,15 @@ def collect_metrics():
                 output += f"xen_{collector_type}_{metric_type}{{{', '.join(tags)}}} {metrics['data'][0]['values'][i]}\n"
 
         output += collect_sr_usage(xen)
+
+        # Collect PBD status metrics if enabled
+        if collect_pbd:
+            output += collect_pbd_status(xen)
+
+        # Collect multipath status metrics if enabled
+        if collect_multipath:
+            output += collect_multipath_status(xen)
+
         collector_end_time = time.perf_counter()
         output += f"xen_collector_duration_seconds {collector_end_time - collector_start_time}\n"
         return output
