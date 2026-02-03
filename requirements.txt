@@ -1,2 +1,3 @@
 pyjson5>=1.6.0
 XenAPI>=2.0
+prometheus_client>=0.17.0
