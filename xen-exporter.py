@@ -1,5 +1,6 @@
 import base64
 import http.server
+import logging
 import urllib.request
 import time
 import traceback
@@ -10,6 +11,12 @@ import threading
 
 import pyjson5
 import XenAPI
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 
 # We aggressively cache the SRs, VMs, and hosts to avoid calling XAPI which can double the runtime (~0.8s to ~1.5s)
@@ -155,14 +162,15 @@ def collect_pbd_status(session: XenAPI.Session):
 
                 output += f'xen_pbd_attached{{sr="{sr_name}", sr_uuid="{sr_uuid}", host="{host_name}", host_uuid="{host_uuid}", type="{sr_type}"}} {attached}\n'
 
-            except Exception:
+            except Exception as e:
                 # Skip this PBD if there's an error, continue with others
+                logging.warning("Error processing PBD record: %s", e)
                 continue
 
-    except Exception:
+    except Exception as e:
         # If we can't get PBD records at all, return empty string
         # This ensures the exporter continues working even if PBD API fails
-        pass
+        logging.error("Failed to collect PBD status: %s", e)
 
     return output
 
@@ -188,7 +196,8 @@ def collect_multipath_status(session: XenAPI.Session):
 
                 output += f'xen_host_multipath_enabled{{host="{host_name}", host_uuid="{host_uuid}"}} {enabled_val}\n'
 
-            except Exception:
+            except Exception as e:
+                logging.warning("Error processing host multipath record: %s", e)
                 continue
 
         # Collect SR-level multipath status via PBDs
@@ -222,13 +231,14 @@ def collect_multipath_status(session: XenAPI.Session):
 
                 output += f'xen_sr_multipath_active{{sr="{sr_name}", sr_uuid="{sr_uuid}"}} {multipath_active}\n'
 
-            except Exception:
+            except Exception as e:
+                logging.warning("Error processing SR multipath record: %s", e)
                 continue
 
-    except Exception:
+    except Exception as e:
         # If we can't get records, return empty string
         # This ensures the exporter continues working even if API fails
-        pass
+        logging.error("Failed to collect multipath status: %s", e)
 
     return output
 
