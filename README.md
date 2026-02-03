@@ -13,6 +13,10 @@ docker run -e XEN_USER=root -e XEN_PASSWORD=<password> -e XEN_HOST=<host> -e XEN
 
 > XEN_MODE - optional, "host" by default. "pool" if you want to parse all hosts from the pool
 
+> XEN_COLLECT_PBD - optional, "true" by default. Collect PBD (Physical Block Device) attachment status metrics
+
+> XEN_COLLECT_MULTIPATH - optional, "true" by default. Collect multipath status metrics for hosts and SRs
+
 # Grafana
 A Grafana dashboard is [available here](https://grafana.com/grafana/dashboards/16588) (id 16588), which graphs most of the critical metrics
 gathered by this exporter.
@@ -114,6 +118,9 @@ If you use XEN_MODE=pool, you must have the same credentials for all hosts in yo
 - xen_host_xapi_live_memory_kib
 - xen_host_xapi_memory_usage_kib
 - xen_host_xapi_open_fds
+- xen_host_multipath_enabled
+- xen_pbd_attached
+- xen_sr_multipath_active
 - xen_vm_cpu
 - xen_vm_memory
 - xen_vm_memory_internal_free
