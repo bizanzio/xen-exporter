@@ -27,6 +27,7 @@ DEFAULT_PORT = 9100
 DEFAULT_BIND_ADDRESS = "0.0.0.0"
 SHORT_SR_UUID_LENGTH = 8  # Expected length of abbreviated SR UUIDs
 HTTP_TIMEOUT_SECONDS = 30  # Timeout for HTTP requests to Xen hosts
+CACHE_MAX_SIZE = 10000  # Maximum entries per cache before cleanup
 
 # We aggressively cache the SRs, VMs, and hosts to avoid calling XAPI which can double the runtime (~0.8s to ~1.5s)
 # Mapping from UUID to human readable name
@@ -36,6 +37,24 @@ srs = dict()
 vms = dict()
 hosts = dict()
 all_srs = set()
+
+
+def _cleanup_cache_if_needed():
+    """Clear caches if they exceed the maximum size to prevent unbounded memory growth."""
+    global srs, vms, hosts, all_srs
+    with _cache_lock:
+        if len(srs) > CACHE_MAX_SIZE:
+            logging.info("Clearing SR cache (size: %d)", len(srs))
+            srs = dict()
+        if len(vms) > CACHE_MAX_SIZE:
+            logging.info("Clearing VM cache (size: %d)", len(vms))
+            vms = dict()
+        if len(hosts) > CACHE_MAX_SIZE:
+            logging.info("Clearing host cache (size: %d)", len(hosts))
+            hosts = dict()
+        if len(all_srs) > CACHE_MAX_SIZE:
+            logging.info("Clearing all_srs cache (size: %d)", len(all_srs))
+            all_srs = set()
 
 def get_all_hosts_in_pool(session):
     host_addresses = []
@@ -301,6 +320,9 @@ def parse_bool_env(env_var: str, default: bool = False) -> bool:
 
 
 def collect_metrics():
+    # Cleanup caches if they've grown too large
+    _cleanup_cache_if_needed()
+
     xen_user = os.getenv("XEN_USER", "root")
     xen_password = os.getenv("XEN_PASSWORD", "")
     xen_host = os.getenv("XEN_HOST", "localhost")
