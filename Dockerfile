@@ -17,6 +17,10 @@ RUN python3 -m pip install -r /app/requirements.txt
 # Install the actual script
 COPY --chown=0:0 --chmod=0644 ./xen-exporter.py /app/xen-exporter.py
 
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:9100/health')" || exit 1
+
 # How to start the script
 USER 10001
 ENTRYPOINT [ "python3", "/app/xen-exporter.py" ]

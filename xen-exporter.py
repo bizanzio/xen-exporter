@@ -498,11 +498,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def __init__(self, request: socket.socket, client_address: tuple[str, int], server: Any) -> None:
         super().__init__(request, client_address, server)
 
+    def log_message(self, format: str, *args) -> None:
+        """Override to use our configured logger instead of stderr."""
+        logging.info("%s - %s", self.address_string(), format % args)
+
     def do_GET(self):
+        # Health check endpoint
+        if self.path == "/health":
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.send_header("Content-Length", "3")
+            self.end_headers()
+            self.wfile.write(b"OK\n")
+            return
+
+        # Metrics endpoint (/ or /metrics)
+        if self.path not in ("/", "/metrics"):
+            self.send_response(404)
+            self.send_header("Content-type", "text/plain")
+            error_msg = b"Not Found\n"
+            self.send_header("Content-Length", str(len(error_msg)))
+            self.end_headers()
+            self.wfile.write(error_msg)
+            return
+
         try:
             metric_output = collect_metrics().encode("utf-8")
             self.send_response(200)
             self.send_header("Content-type", "text/plain")
+            self.send_header("Content-Length", str(len(metric_output)))
             self.end_headers()
             self.wfile.write(metric_output)
         except BaseException:
@@ -510,8 +534,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             logging.error("Error collecting metrics: %s", error_msg)
             self.send_response(500)
             self.send_header("Content-type", "text/plain")
+            error_body = b"Internal Server Error\n"
+            self.send_header("Content-Length", str(len(error_body)))
             self.end_headers()
-            self.wfile.write(b"Internal Server Error\n")
+            self.wfile.write(error_body)
 
 
 def validate_config():
@@ -522,6 +548,11 @@ def validate_config():
     xen_host = os.getenv("XEN_HOST")
     if not xen_host:
         logging.warning("XEN_HOST not set, using default 'localhost'")
+
+    # Warn if XEN_PASSWORD is empty
+    xen_password = os.getenv("XEN_PASSWORD")
+    if not xen_password:
+        logging.warning("XEN_PASSWORD not set or empty - authentication may fail")
 
     # Validate XEN_MODE
     xen_mode = os.getenv("XEN_MODE")

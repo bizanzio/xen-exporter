@@ -1,2 +1,2 @@
-pyjson5
-XenAPI
+pyjson5>=1.6.0
+XenAPI>=2.0

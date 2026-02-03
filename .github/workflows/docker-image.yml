@@ -12,7 +12,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Build and push Docker image
       uses: pmorelli92/github-container-registry-build-push@2.0.0
       with:

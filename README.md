@@ -30,8 +30,7 @@ gathered by this exporter.
 
 docker-compose.yml
 
-```
-version: '2.4'
+```yaml
 services:
   xen01:
     container_name: xen01
@@ -54,7 +53,7 @@ services:
 
 prometheus.yml
 
-```
+```yaml
   - job_name: xenserver
     scrape_interval: 60s
     scrape_timeout: 50s
@@ -84,6 +83,9 @@ If you use XEN_MODE=pool, you must have the same credentials for all hosts in yo
 - xen_host_cpu_avg_freq
 - xen_host_cpu_c0
 - xen_host_cpu_c1
+- xen_host_cpu_c2
+- xen_host_cpu_c3
+- xen_host_cpu_c4
 - xen_host_cpu_p0
 - xen_host_cpu_p1
 - xen_host_cpu_p2
@@ -97,6 +99,10 @@ If you use XEN_MODE=pool, you must have the same credentials for all hosts in yo
 - xen_host_iowait
 - xen_host_latency
 - xen_host_loadavg
+- xen_host_hostload
+- xen_host_running_domains
+- xen_host_running_vcpus
+- xen_host_dcmi_power_reading
 - xen_host_memory_free_kib
 - xen_host_memory_reclaimed
 - xen_host_memory_reclaimed_max

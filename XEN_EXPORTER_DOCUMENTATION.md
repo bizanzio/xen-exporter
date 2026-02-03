@@ -27,10 +27,11 @@
 ### Project Structure
 ```
 xen-exporter/
-├── xen-exporter.py      # Main application (293 lines)
+├── xen-exporter.py      # Main application (~560 lines)
 ├── requirements.txt     # Python dependencies (pyjson5, XenAPI)
 ├── Dockerfile           # Docker containerization
 ├── README.md            # Basic documentation
+├── METRICS_REFERENCE.md # Complete metrics documentation
 └── LICENSE              # BSD 2-Clause License
 ```
 
@@ -53,9 +54,9 @@ URL: https://<xen_host>/rrd_updates?start=<timestamp>&json=true&host=true&cf=AVE
 3. Receives JSON5 formatted response containing all metrics
 4. Parses the legend to extract metric names and associated metadata
 
-**Code Reference (Line 173-186):**
+**Code Reference (Line 360-375):**
 ```python
-url = f"https://{xen_host}/rrd_updates?start={int(time.time()-10)}&json=true&host=true&cf=AVERAGE"
+url = f"https://{current_host}/rrd_updates?start={int(time.time()-DEFAULT_METRICS_WINDOW_SECONDS)}&json=true&host=true&cf=AVERAGE"
 
 req = urllib.request.Request(url)
 req.add_header(
@@ -63,7 +64,9 @@ req.add_header(
     "Basic " + base64.b64encode((xen_user + ":" + xen_password).encode("utf-8")).decode("utf-8"),
 )
 res = urllib.request.urlopen(
-    req, context=None if verify_ssl else ssl._create_unverified_context()
+    req,
+    context=None if verify_ssl else ssl._create_unverified_context(),
+    timeout=HTTP_TIMEOUT_SECONDS
 )
 metrics = pyjson5.decode_io(res)
 ```
@@ -79,7 +82,7 @@ sr_records = session.xenapi.SR.get_all_records()
 3. Queries Storage Repository (SR) records directly
 4. Extracts physical_size, physical_utilisation, virtual_allocation
 
-**Code Reference (Line 94-108):**
+**Code Reference (Line 145-159):**
 ```python
 def collect_sr_usage(session: XenAPI.Session):
     sr_records = session.xenapi.SR.get_all_records()
@@ -178,7 +181,7 @@ The exporter reports its own collection time:
 xen_collector_duration_seconds <value>
 ```
 
-**Code Reference (Line 260-261):**
+**Code Reference (Line 493-494):**
 ```python
 collector_end_time = time.perf_counter()
 output += f"xen_collector_duration_seconds {collector_end_time - collector_start_time}\n"
@@ -452,17 +455,17 @@ networks:
 The current exporter uses **Basic Authentication** with username/password:
 
 ```python
-# Current implementation (xen-exporter.py lines 147-148)
+# Current implementation (xen-exporter.py lines 331-332)
 xen_user = os.getenv("XEN_USER", "root")
 xen_password = os.getenv("XEN_PASSWORD", "")
 
-# Used for RRD API (line 176-181)
+# Used for RRD API (line 362-368)
 req.add_header(
     "Authorization",
     "Basic " + base64.b64encode((xen_user + ":" + xen_password).encode("utf-8")).decode("utf-8"),
 )
 
-# Used for XenAPI (line 114-116)
+# Used for XenAPI (line 285-286)
 self.session.xenapi.login_with_password(username, password, "1.0", "xen-exporter")
 ```
 
@@ -974,41 +977,14 @@ The current exporter focuses on RRD-based metrics which cover performance and re
 **What is Multipath?**
 Multipath I/O (MPIO) provides redundant paths to storage devices, improving availability and load balancing.
 
-**Planned Metrics:**
+**Implemented Metrics:**
 
 | Metric | Type | Description |
 |--------|------|-------------|
 | `xen_host_multipath_enabled` | Gauge | Whether multipath is enabled on the host (1=enabled, 0=disabled) |
 | `xen_sr_multipath_active` | Gauge | Whether multipath is active for the SR (1=active, 0=inactive) |
-| `xen_sr_multipath_paths` | Gauge | Number of available paths to the storage |
 
-**Implementation Approach:**
-```python
-def collect_multipath_status(session: XenAPI.Session):
-    output = ""
-    hosts = session.xenapi.host.get_all_records()
-    for host_uuid, host_record in hosts.items():
-        host_name = host_record["name_label"]
-        # Check multipath in other_config
-        multipath_enabled = host_record.get("other_config", {}).get("multipathing", "false")
-        enabled_val = 1 if multipath_enabled.lower() == "true" else 0
-        output += f'xen_host_multipath_enabled{{host="{host_name}", host_uuid="{host_uuid}"}} {enabled_val}\n'
-
-    # Check SR multipath status via PBDs
-    pbds = session.xenapi.PBD.get_all_records()
-    for pbd_ref, pbd_record in pbds.items():
-        sr_ref = pbd_record["SR"]
-        sr_record = session.xenapi.SR.get_record(sr_ref)
-        sr_name = sr_record["name_label"]
-        sr_uuid = sr_record["uuid"]
-
-        # Check device_config for multipath info
-        device_config = pbd_record.get("device_config", {})
-        multipath_active = 1 if device_config.get("multipath", "false").lower() == "true" else 0
-        output += f'xen_sr_multipath_active{{sr="{sr_name}", sr_uuid="{sr_uuid}"}} {multipath_active}\n'
-
-    return output
-```
+**Implementation:** See `collect_multipath_status()` function in xen-exporter.py (lines 214-279).
 
 **Labels:**
 | Label | Description |
@@ -1050,64 +1026,6 @@ Information about backend storage targets (iSCSI, NFS, Fibre Channel) including 
 | `xen_sr_nfs_target_info` | Info | NFS target connectivity information |
 | `xen_sr_fc_info` | Info | Fibre Channel storage information |
 
-**Implementation Approach:**
-```python
-def collect_pbd_status(session: XenAPI.Session):
-    output = ""
-    pbd_records = session.xenapi.PBD.get_all_records()
-
-    for pbd_ref, pbd_record in pbd_records.items():
-        sr_ref = pbd_record["SR"]
-        host_ref = pbd_record["host"]
-
-        sr_record = session.xenapi.SR.get_record(sr_ref)
-        host_record = session.xenapi.host.get_record(host_ref)
-
-        sr_name = sr_record["name_label"]
-        sr_uuid = sr_record["uuid"]
-        sr_type = sr_record["type"]
-        host_name = host_record["name_label"]
-        host_uuid = host_record["uuid"]
-
-        attached = 1 if pbd_record["currently_attached"] else 0
-
-        output += f'xen_pbd_attached{{sr="{sr_name}", sr_uuid="{sr_uuid}", host="{host_name}", host_uuid="{host_uuid}", type="{sr_type}"}} {attached}\n'
-
-    return output
-
-def collect_storage_targets(session: XenAPI.Session):
-    output = ""
-    pbd_records = session.xenapi.PBD.get_all_records()
-
-    for pbd_ref, pbd_record in pbd_records.items():
-        sr_ref = pbd_record["SR"]
-        sr_record = session.xenapi.SR.get_record(sr_ref)
-        sr_name = sr_record["name_label"]
-        sr_uuid = sr_record["uuid"]
-        sr_type = sr_record["type"]
-
-        device_config = pbd_record.get("device_config", {})
-
-        # iSCSI targets
-        if sr_type == "lvmoiscsi" or sr_type == "iscsi":
-            target = device_config.get("target", "unknown")
-            target_iqn = device_config.get("targetIQN", "unknown")
-            output += f'xen_sr_iscsi_target_info{{sr="{sr_name}", sr_uuid="{sr_uuid}", target="{target}", iqn="{target_iqn}"}} 1\n'
-
-        # NFS targets
-        elif sr_type == "nfs" or sr_type == "iso":
-            server = device_config.get("server", "unknown")
-            server_path = device_config.get("serverpath", "unknown")
-            output += f'xen_sr_nfs_target_info{{sr="{sr_name}", sr_uuid="{sr_uuid}", server="{server}", path="{server_path}"}} 1\n'
-
-        # Fibre Channel
-        elif sr_type == "lvmohba":
-            scsi_id = device_config.get("SCSIid", "unknown")
-            output += f'xen_sr_fc_info{{sr="{sr_name}", sr_uuid="{sr_uuid}", scsi_id="{scsi_id}"}} 1\n'
-
-    return output
-```
-
 **Labels for PBD Metrics:**
 | Label | Description |
 |-------|-------------|
@@ -1148,7 +1066,7 @@ def collect_storage_targets(session: XenAPI.Session):
 
 ### 9.6 Integration Point
 
-When implemented, these functions would be called from `collect_metrics()`:
+PBD and multipath metrics are already integrated in `collect_metrics()` (lines 483-491):
 
 ```python
 def collect_metrics():
@@ -1159,9 +1077,15 @@ def collect_metrics():
 
         output += collect_sr_usage(xen)
 
-        # Future enhancements (uncomment when implemented)
-        # output += collect_pbd_status(xen)
-        # output += collect_multipath_status(xen)
+        # PBD status metrics (enabled by default via XEN_COLLECT_PBD)
+        if collect_pbd:
+            output += collect_pbd_status(xen)
+
+        # Multipath status metrics (enabled by default via XEN_COLLECT_MULTIPATH)
+        if collect_multipath:
+            output += collect_multipath_status(xen)
+
+        # Future: Storage target info (not yet implemented)
         # output += collect_storage_targets(xen)
 
         collector_end_time = time.perf_counter()

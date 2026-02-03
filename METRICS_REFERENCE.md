@@ -15,13 +15,14 @@ This document provides a complete reference of all metrics exported by xen-expor
 
 ### Metrics Summary
 
-| Category | Current Count | Planned Count | Total After Implementation |
-|----------|---------------|---------------|---------------------------|
-| Host Metrics | 39+ | 1 | 40+ |
-| VM Metrics | 20+ | 0 | 20+ |
-| Storage Metrics | 3 | 6 | 9 |
-| System Metrics | 1 | 0 | 1 |
-| **Total** | **60+** | **7** | **70+** |
+| Category | Current Count | Description |
+|----------|---------------|-------------|
+| Host Metrics | 45+ | CPU, Memory, Disk I/O, Network, XAPI, Multipath |
+| VM Metrics | 20+ | CPU, Memory, VBD, VIF |
+| Storage Metrics | 4 | Physical size, utilization, allocation, multipath |
+| PBD Metrics | 1 | Attachment status |
+| System Metrics | 1 | Collector duration |
+| **Total** | **70+** | Dynamic based on infrastructure |
 
 ---
 
@@ -40,6 +41,9 @@ This document provides a complete reference of all metrics exported by xen-expor
 | `xen_host_cpu_p0` | Gauge | Ratio | CPU P0 power state time |
 | `xen_host_cpu_p1` | Gauge | Ratio | CPU P1 power state time |
 | `xen_host_cpu_p2` | Gauge | Ratio | CPU P2 power state time |
+| `xen_host_cpu_c2` | Gauge | Ratio | CPU C2 state time |
+| `xen_host_cpu_c3` | Gauge | Ratio | CPU C3 state time |
+| `xen_host_cpu_c4` | Gauge | Ratio | CPU C4 state time |
 
 #### Memory Metrics
 | Metric | Type | Unit | Description |
@@ -100,6 +104,11 @@ This document provides a complete reference of all metrics exported by xen-expor
 |--------|------|------|-------------|
 | `xen_host_loadavg` | Gauge | Load | System load average |
 | `xen_host_tapdisks_in_low_memory_mode` | Gauge | Count | Tapdisks in low memory mode |
+| `xen_host_multipath_enabled` | Gauge | Boolean (0/1) | Whether multipath is enabled on the host |
+| `xen_host_hostload` | Gauge | Load | Host load |
+| `xen_host_running_domains` | Gauge | Count | Number of running domains (VMs) |
+| `xen_host_running_vcpus` | Gauge | Count | Number of running vCPUs |
+| `xen_host_dcmi_power_reading` | Gauge | Watts | DCMI power reading (if available) |
 
 ---
 
@@ -150,10 +159,17 @@ This document provides a complete reference of all metrics exported by xen-expor
 | `xen_sr_physical_size` | Gauge | Bytes | Total physical size of SR |
 | `xen_sr_physical_utilization` | Gauge | Bytes | Used physical space on SR |
 | `xen_sr_virtual_allocation` | Gauge | Bytes | Virtual allocation on SR |
+| `xen_sr_multipath_active` | Gauge | Boolean (0/1) | Whether multipath is active for the SR |
+
+### 2.4 PBD Metrics (xen_pbd_*)
+
+| Metric | Type | Unit | Description |
+|--------|------|------|-------------|
+| `xen_pbd_attached` | Gauge | Boolean (0/1) | PBD connection status (1=attached, 0=detached) |
 
 ---
 
-### 2.4 System Metrics
+### 2.6 System Metrics
 
 | Metric | Type | Unit | Description |
 |--------|------|------|-------------|
@@ -383,20 +399,17 @@ xen_sr_virtual_allocation > xen_sr_physical_size
 xen_sr_physical_size - xen_sr_physical_utilization
 ```
 
-### 5.4 Planned Queries (After Future Implementation)
+### 5.4 PBD and Multipath Queries
 
 ```promql
-# Hosts with multipath disabled (PLANNED)
+# Hosts with multipath disabled
 xen_host_multipath_enabled == 0
 
-# Detached PBDs - storage connectivity issues (PLANNED)
+# Detached PBDs - storage connectivity issues
 xen_pbd_attached == 0
 
-# SRs without active multipath (PLANNED)
+# SRs without active multipath
 xen_sr_multipath_active == 0
-
-# Count of storage paths per SR (PLANNED)
-xen_sr_multipath_paths
 ```
 
 ### 5.5 Alerting Rule Examples
@@ -455,15 +468,25 @@ groups:
           summary: "Xen exporter collection is slow"
           description: "Collection took {{ $value | humanizeDuration }}"
 
-      # PLANNED: PBD detached alert
-      # - alert: XenPBDDetached
-      #   expr: xen_pbd_attached == 0
-      #   for: 1m
-      #   labels:
-      #     severity: critical
-      #   annotations:
-      #     summary: "Storage disconnected on {{ $labels.host }}"
-      #     description: "SR {{ $labels.sr }} is detached from {{ $labels.host }}"
+      # PBD detached alert
+      - alert: XenPBDDetached
+        expr: xen_pbd_attached == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Storage disconnected on {{ $labels.host }}"
+          description: "SR {{ $labels.sr }} is detached from {{ $labels.host }}"
+
+      # Multipath disabled alert
+      - alert: XenMultipathDisabled
+        expr: xen_host_multipath_enabled == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Multipath disabled on {{ $labels.host }}"
+          description: "Host {{ $labels.host }} does not have multipath enabled"
 ```
 
 ---
