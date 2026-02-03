@@ -1,32 +1,33 @@
-# XEN-EXPORTER - Metrics Reference Guide
+# xen-exporter Metrics Reference
 
 ## Table of Contents
 1. [Overview](#1-overview)
-2. [Currently Available Metrics](#2-currently-available-metrics)
-3. [Planned Future Metrics](#3-planned-future-metrics)
-4. [Metric Labels Reference](#4-metric-labels-reference)
-5. [Example Queries](#5-example-queries)
+2. [Metrics Reference](#2-metrics-reference)
+3. [Labels Reference](#3-labels-reference)
+4. [Example Queries](#4-example-queries)
+5. [Alerting Rules](#5-alerting-rules)
+6. [Architecture](#6-architecture)
+7. [Security Considerations](#7-security-considerations)
+8. [Production Deployment](#8-production-deployment)
 
 ---
 
 ## 1. Overview
 
-This document provides a complete reference of all metrics exported by xen-exporter, including both currently implemented metrics and planned future enhancements.
-
 ### Metrics Summary
 
-| Category | Current Count | Description |
-|----------|---------------|-------------|
-| Host Metrics | 45+ | CPU, Memory, Disk I/O, Network, XAPI, Multipath |
+| Category | Count | Description |
+|----------|-------|-------------|
+| Host Metrics | 60+ | CPU, Memory, Disk I/O, Network, XAPI, Xenopsd |
 | VM Metrics | 20+ | CPU, Memory, VBD, VIF |
 | Storage Metrics | 4 | Physical size, utilization, allocation, multipath |
 | PBD Metrics | 1 | Attachment status |
 | System Metrics | 1 | Collector duration |
-| **Total** | **70+** | Dynamic based on infrastructure |
+| **Total** | **85+** | Dynamic based on infrastructure |
 
 ---
 
-## 2. Currently Available Metrics
+## 2. Metrics Reference
 
 ### 2.1 Host Metrics (xen_host_*)
 
@@ -38,12 +39,12 @@ This document provides a complete reference of all metrics exported by xen-expor
 | `xen_host_cpu_avg_freq` | Gauge | Hz | Average CPU frequency |
 | `xen_host_cpu_c0` | Gauge | Ratio | CPU C0 (active) state time |
 | `xen_host_cpu_c1` | Gauge | Ratio | CPU C1 (halt) state time |
-| `xen_host_cpu_p0` | Gauge | Ratio | CPU P0 power state time |
-| `xen_host_cpu_p1` | Gauge | Ratio | CPU P1 power state time |
-| `xen_host_cpu_p2` | Gauge | Ratio | CPU P2 power state time |
 | `xen_host_cpu_c2` | Gauge | Ratio | CPU C2 state time |
 | `xen_host_cpu_c3` | Gauge | Ratio | CPU C3 state time |
 | `xen_host_cpu_c4` | Gauge | Ratio | CPU C4 state time |
+| `xen_host_cpu_p0` | Gauge | Ratio | CPU P0 power state time |
+| `xen_host_cpu_p1` | Gauge | Ratio | CPU P1 power state time |
+| `xen_host_cpu_p2` | Gauge | Ratio | CPU P2 power state time |
 
 #### Memory Metrics
 | Metric | Type | Unit | Description |
@@ -122,12 +123,12 @@ This document provides a complete reference of all metrics exported by xen-expor
 | Metric | Type | Unit | Description |
 |--------|------|------|-------------|
 | `xen_host_loadavg` | Gauge | Load | System load average |
-| `xen_host_tapdisks_in_low_memory_mode` | Gauge | Count | Tapdisks in low memory mode |
-| `xen_host_multipath_enabled` | Gauge | Boolean (0/1) | Whether multipath is enabled on the host |
 | `xen_host_hostload` | Gauge | Load | Host load |
 | `xen_host_running_domains` | Gauge | Count | Number of running domains (VMs) |
 | `xen_host_running_vcpus` | Gauge | Count | Number of running vCPUs |
 | `xen_host_dcmi_power_reading` | Gauge | Watts | DCMI power reading (if available) |
+| `xen_host_tapdisks_in_low_memory_mode` | Gauge | Count | Tapdisks in low memory mode |
+| `xen_host_multipath_enabled` | Gauge | Boolean (0/1) | Whether multipath is enabled on the host |
 
 ---
 
@@ -187,9 +188,7 @@ This document provides a complete reference of all metrics exported by xen-expor
 |--------|------|------|-------------|
 | `xen_pbd_attached` | Gauge | Boolean (0/1) | PBD connection status (1=attached, 0=detached) |
 
----
-
-### 2.6 System Metrics
+### 2.5 System Metrics
 
 | Metric | Type | Unit | Description |
 |--------|------|------|-------------|
@@ -197,53 +196,38 @@ This document provides a complete reference of all metrics exported by xen-expor
 
 ---
 
-## 3. PBD and Multipath Metrics (Implemented)
+## 3. Labels Reference
 
-The following metrics have been implemented to provide enhanced storage monitoring capabilities.
+### Host Metric Labels
+| Label | Description | Example |
+|-------|-------------|---------|
+| `host` | Human-readable host name | `xenserver01` |
+| `host_uuid` | Host UUID | `a1b2c3d4-e5f6-7890-abcd-ef1234567890` |
+| `sr` | Storage Repository name | `Local Storage` |
+| `sr_uuid` | Storage Repository UUID | `e5f6g7h8-i9j0-1234-klmn-op5678901234` |
+| `pif` | Physical Interface identifier | `eth0`, `bond0` |
+| `cpu` | CPU core number | `0`, `1`, `2` |
 
-### 3.1 Multipath Metrics
+### VM Metric Labels
+| Label | Description | Example |
+|-------|-------------|---------|
+| `vm` | Human-readable VM name | `web-server-01` |
+| `vm_uuid` | VM UUID | `i9j0k1l2-m3n4-5678-opqr-st9012345678` |
+| `host` | Host running the VM | `xenserver01` |
+| `host_uuid` | Host UUID | `a1b2c3d4-e5f6-7890-abcd-ef1234567890` |
+| `vbd` | Virtual Block Device identifier | `xvda`, `xvdb` |
+| `vif` | Virtual Interface number | `0`, `1` |
+| `cpu` | vCPU number | `0`, `1` |
 
-**Status:** IMPLEMENTED
+### Storage Metric Labels
+| Label | Description | Example |
+|-------|-------------|---------|
+| `sr` | Storage Repository name | `NFS_Storage` |
+| `sr_uuid` | Storage Repository UUID | `m3n4o5p6-q7r8-9012-stuv-wx3456789012` |
+| `type` | SR type | `nfs`, `lvmoiscsi`, `lvm`, `ext` |
+| `content_type` | Content type | `user`, `iso` |
 
-**Environment Variable:** `XEN_COLLECT_MULTIPATH` (default: `true`)
-
-| Metric | Type | Unit | Description |
-|--------|------|------|-------------|
-| `xen_host_multipath_enabled` | Gauge | Boolean (0/1) | Whether multipath is enabled on the host |
-| `xen_sr_multipath_active` | Gauge | Boolean (0/1) | Whether multipath is active for the SR |
-
-**Labels:**
-| Label | Description |
-|-------|-------------|
-| `host` | Host name (for host metrics) |
-| `host_uuid` | Host UUID (for host metrics) |
-| `sr` | Storage Repository name (for SR metrics) |
-| `sr_uuid` | Storage Repository UUID (for SR metrics) |
-
-**Use Cases:**
-- Monitor multipath failover status
-- Alert when multipath is disabled
-- Track multipath configuration across pool
-
-**Example Alert:**
-```promql
-xen_host_multipath_enabled == 0  # Alert when multipath disabled
-xen_sr_multipath_active == 0     # Alert when SR multipath inactive
-```
-
----
-
-### 3.2 PBD (Physical Block Device) Metrics
-
-**Status:** IMPLEMENTED
-
-**Environment Variable:** `XEN_COLLECT_PBD` (default: `true`)
-
-| Metric | Type | Unit | Description |
-|--------|------|------|-------------|
-| `xen_pbd_attached` | Gauge | Boolean (0/1) | PBD connection status (1=attached, 0=detached) |
-
-**Labels:**
+### PBD Metric Labels
 | Label | Description |
 |-------|-------------|
 | `sr` | Storage Repository name |
@@ -252,115 +236,11 @@ xen_sr_multipath_active == 0     # Alert when SR multipath inactive
 | `host_uuid` | Host UUID |
 | `type` | SR type (nfs, lvmoiscsi, lvm, etc.) |
 
-**Use Cases:**
-- Detect storage disconnections immediately
-- Monitor SR availability per host
-- Alert on PBD detachment events
-
-**Example Alert:**
-```promql
-xen_pbd_attached == 0  # Alert when PBD detached (critical)
-```
-
-**Implementation Priority:** High - DONE
-
 ---
 
-### 3.3 Storage Target Information Metrics (Planned)
+## 4. Example Queries
 
-**Status:** NOT YET IMPLEMENTED
-
-#### iSCSI Target Metrics
-| Metric | Type | Description |
-|--------|------|-------------|
-| `xen_sr_iscsi_target_info` | Info | iSCSI target connectivity information |
-
-**Labels:** `sr`, `sr_uuid`, `target` (IP/hostname), `iqn` (iSCSI Qualified Name)
-
-#### NFS Target Metrics
-| Metric | Type | Description |
-|--------|------|-------------|
-| `xen_sr_nfs_target_info` | Info | NFS server connectivity information |
-
-**Labels:** `sr`, `sr_uuid`, `server` (IP/hostname), `path` (export path)
-
-#### Fibre Channel Metrics
-| Metric | Type | Description |
-|--------|------|-------------|
-| `xen_sr_fc_info` | Info | Fibre Channel storage information |
-
-**Labels:** `sr`, `sr_uuid`, `scsi_id`
-
-**Use Cases:**
-- Inventory storage targets in Prometheus
-- Correlate storage issues with specific targets
-- Document infrastructure in metrics
-
-**Implementation Priority:** Medium
-
----
-
-### 3.4 Summary: Implementation Status
-
-| Category | Metric | Status | Env Variable |
-|----------|--------|--------|--------------|
-| **Multipath** | `xen_host_multipath_enabled` | IMPLEMENTED | `XEN_COLLECT_MULTIPATH` |
-| **Multipath** | `xen_sr_multipath_active` | IMPLEMENTED | `XEN_COLLECT_MULTIPATH` |
-| **PBD** | `xen_pbd_attached` | IMPLEMENTED | `XEN_COLLECT_PBD` |
-| **iSCSI** | `xen_sr_iscsi_target_info` | Planned | - |
-| **NFS** | `xen_sr_nfs_target_info` | Planned | - |
-| **FC** | `xen_sr_fc_info` | Planned | - |
-
----
-
-## 4. Metric Labels Reference
-
-### 4.1 Host Metric Labels
-
-| Label | Description | Example |
-|-------|-------------|---------|
-| `host` | Human-readable host name | `xenserver01` |
-| `host_uuid` | Host UUID | `a1b2c3d4-e5f6-7890-abcd-ef1234567890` |
-| `sr` | Storage Repository name (for SR-related host metrics) | `Local Storage` |
-| `sr_uuid` | Storage Repository UUID | `e5f6g7h8-i9j0-1234-klmn-op5678901234` |
-| `pif` | Physical Interface identifier | `eth0`, `bond0` |
-| `cpu` | CPU core number | `0`, `1`, `2`, `3` |
-
-### 4.2 VM Metric Labels
-
-| Label | Description | Example |
-|-------|-------------|---------|
-| `vm` | Human-readable VM name | `web-server-01` |
-| `vm_uuid` | VM UUID | `i9j0k1l2-m3n4-5678-opqr-st9012345678` |
-| `vbd` | Virtual Block Device identifier | `xvda`, `xvdb` |
-| `vif` | Virtual Interface number | `0`, `1`, `2` |
-| `cpu` | vCPU number | `0`, `1` |
-
-### 4.3 Storage Metric Labels
-
-| Label | Description | Example |
-|-------|-------------|---------|
-| `sr` | Storage Repository name | `NFS_Storage`, `iSCSI_LUN1` |
-| `sr_uuid` | Storage Repository UUID | `m3n4o5p6-q7r8-9012-stuv-wx3456789012` |
-| `type` | SR type | `nfs`, `lvmoiscsi`, `lvm`, `ext`, `iso` |
-| `content_type` | Content type | `user`, `iso` |
-
-### 4.4 Planned Labels (Future)
-
-| Label | Description | Applicable Metrics |
-|-------|-------------|-------------------|
-| `target` | iSCSI target IP/hostname | `xen_sr_iscsi_target_info` |
-| `iqn` | iSCSI Qualified Name | `xen_sr_iscsi_target_info` |
-| `server` | NFS server IP/hostname | `xen_sr_nfs_target_info` |
-| `path` | NFS export path | `xen_sr_nfs_target_info` |
-| `scsi_id` | Fibre Channel SCSI ID | `xen_sr_fc_info` |
-
----
-
-## 5. Example Queries
-
-### 5.1 Host Monitoring Queries
-
+### Host Monitoring
 ```promql
 # CPU utilization per host (average across all cores)
 xen_host_cpu_avg
@@ -371,40 +251,26 @@ xen_host_cpu_avg
 # Host load average
 xen_host_loadavg
 
-# Network throughput per host (combined RX + TX)
+# Network throughput per host
 sum by (host) (xen_host_pif_rx + xen_host_pif_tx)
 
-# Disk IOPS per host
-xen_host_iops_total
-
-# Disk latency per host
+# Disk latency
 xen_host_latency
 ```
 
-### 5.2 VM Monitoring Queries
-
+### VM Monitoring
 ```promql
-# CPU utilization per VM (average across all vCPUs)
+# CPU utilization per VM (average across vCPUs)
 avg by (vm) (xen_vm_cpu)
 
 # Top 10 VMs by CPU usage
 topk(10, avg by (vm) (xen_vm_cpu))
 
-# VM memory usage
-xen_vm_memory
-
-# VM disk IOPS (combined read + write)
-sum by (vm) (xen_vm_vbd_iops_total)
-
-# VM network throughput
-sum by (vm) (xen_vm_vif_rx + xen_vm_vif_tx)
-
 # VMs with high disk latency (> 10ms)
 xen_vm_vbd_latency > 0.01
 ```
 
-### 5.3 Storage Monitoring Queries
-
+### Storage Monitoring
 ```promql
 # SR utilization percentage
 (xen_sr_physical_utilization / xen_sr_physical_size) * 100
@@ -412,43 +278,29 @@ xen_vm_vbd_latency > 0.01
 # SRs with > 80% utilization
 (xen_sr_physical_utilization / xen_sr_physical_size) * 100 > 80
 
-# Over-provisioned SRs (virtual > physical)
-xen_sr_virtual_allocation > xen_sr_physical_size
-
-# Free space per SR
-xen_sr_physical_size - xen_sr_physical_utilization
-```
-
-### 5.4 PBD and Multipath Queries
-
-```promql
-# Hosts with multipath disabled
-xen_host_multipath_enabled == 0
-
-# Detached PBDs - storage connectivity issues
+# Detached PBDs
 xen_pbd_attached == 0
 
-# SRs without active multipath
-xen_sr_multipath_active == 0
+# Hosts with multipath disabled
+xen_host_multipath_enabled == 0
 ```
 
-### 5.5 Alerting Rule Examples
+---
+
+## 5. Alerting Rules
 
 ```yaml
 groups:
   - name: xen-alerts
     rules:
-      # High CPU usage alert
       - alert: XenHostHighCPU
         expr: xen_host_cpu_avg > 0.9
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "High CPU usage on {{ $labels.host }}"
-          description: "CPU usage is {{ $value | humanizePercentage }}"
+          summary: "High CPU on {{ $labels.host }}"
 
-      # Low memory alert
       - alert: XenHostLowMemory
         expr: (xen_host_memory_free_kib / xen_host_memory_total_kib) < 0.1
         for: 5m
@@ -456,9 +308,7 @@ groups:
           severity: critical
         annotations:
           summary: "Low memory on {{ $labels.host }}"
-          description: "Only {{ $value | humanizePercentage }} memory free"
 
-      # SR almost full alert
       - alert: XenSRAlmostFull
         expr: (xen_sr_physical_utilization / xen_sr_physical_size) > 0.9
         for: 10m
@@ -466,39 +316,15 @@ groups:
           severity: critical
         annotations:
           summary: "SR {{ $labels.sr }} is almost full"
-          description: "SR utilization is {{ $value | humanizePercentage }}"
 
-      # High disk latency alert
-      - alert: XenHostHighDiskLatency
-        expr: xen_host_latency > 0.05
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "High disk latency on {{ $labels.host }}"
-          description: "Disk latency is {{ $value | humanizeDuration }}"
-
-      # Collector slow alert
-      - alert: XenCollectorSlow
-        expr: xen_collector_duration_seconds > 30
-        for: 2m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Xen exporter collection is slow"
-          description: "Collection took {{ $value | humanizeDuration }}"
-
-      # PBD detached alert
       - alert: XenPBDDetached
         expr: xen_pbd_attached == 0
         for: 1m
         labels:
           severity: critical
         annotations:
-          summary: "Storage disconnected on {{ $labels.host }}"
-          description: "SR {{ $labels.sr }} is detached from {{ $labels.host }}"
+          summary: "Storage disconnected: {{ $labels.sr }} on {{ $labels.host }}"
 
-      # Multipath disabled alert
       - alert: XenMultipathDisabled
         expr: xen_host_multipath_enabled == 0
         for: 5m
@@ -506,8 +332,126 @@ groups:
           severity: warning
         annotations:
           summary: "Multipath disabled on {{ $labels.host }}"
-          description: "Host {{ $labels.host }} does not have multipath enabled"
+
+      - alert: XenCollectorSlow
+        expr: xen_collector_duration_seconds > 30
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Metric collection slow"
 ```
+
+---
+
+## 6. Architecture
+
+### Collection Methods
+
+**1. RRD Updates API (Primary)**
+```
+GET https://<host>/rrd_updates?start=<timestamp>&json=true&host=true&cf=AVERAGE
+```
+- Retrieves all RRD metrics in a single request
+- Returns JSON5 formatted response
+- Uses Basic Authentication
+
+**2. XenAPI Direct Calls (Storage/PBD/Multipath)**
+```python
+session.xenapi.SR.get_all_records()
+session.xenapi.PBD.get_all_records()
+session.xenapi.host.get_all_records()
+```
+
+### Processing Pipeline
+```
+Dom0 RRD Database
+       ↓
+HTTPS Request (Basic Auth)
+       ↓
+JSON5 Response Parsing
+       ↓
+UUID Resolution (cached)
+       ↓
+Prometheus Format Output
+```
+
+### Performance
+| Operation | Typical Duration |
+|-----------|------------------|
+| Total (cached) | ~800ms |
+| Total (uncached) | ~1500ms |
+
+---
+
+## 7. Security Considerations
+
+### Issues and Mitigations
+
+| Issue | Severity | Mitigation |
+|-------|----------|------------|
+| Plain-text credentials | High | Use secrets management (Vault, K8s secrets) |
+| SSL verification bypass | High | Always enable `XEN_SSL_VERIFY=true` in production |
+| No endpoint authentication | High | Deploy behind authenticated reverse proxy |
+| Sensitive info in metrics | Medium | Network segmentation, metric relabeling |
+| Default root user | Medium | Create dedicated read-only XenServer user |
+
+### Recommended Secure Deployment
+```yaml
+services:
+  xen-exporter:
+    image: ghcr.io/mikedombo/xen-exporter:latest
+    environment:
+      - XEN_HOST=10.10.10.101
+      - XEN_USER=monitoring_user  # NOT root
+      - XEN_SSL_VERIFY=true
+    secrets:
+      - xen_password
+    networks:
+      - monitoring  # Isolated network
+
+secrets:
+  xen_password:
+    external: true
+
+networks:
+  monitoring:
+    internal: true
+```
+
+---
+
+## 8. Production Deployment
+
+### Prometheus Configuration
+```yaml
+scrape_configs:
+  - job_name: xenserver
+    scrape_interval: 60s
+    scrape_timeout: 50s
+    static_configs:
+      - targets: ["xen-exporter:9100"]
+```
+
+### Resource Requirements
+
+**Exporter Host:**
+| Resource | Minimum | Recommended |
+|----------|---------|-------------|
+| CPU | 0.1 vCPU | 0.5 vCPU |
+| RAM | 64 MB | 128 MB |
+| Python | 3.12+ | 3.14+ |
+
+**Dom0 Impact:**
+| Scenario | CPU Impact |
+|----------|------------|
+| 1-10 VMs | Negligible |
+| 10-50 VMs | ~1% per scrape |
+| 50-100 VMs | ~2-3% per scrape |
+| 100+ VMs | Consider 120s interval |
+
+### Scalability Note
+Filtering metrics on the client side does NOT reduce Dom0 load. The RRD API returns all metrics regardless. To reduce load, increase `scrape_interval`.
 
 ---
 
@@ -515,8 +459,8 @@ groups:
 
 | Field | Value |
 |-------|-------|
-| **Document** | Metrics Reference Guide |
 | **Project** | xen-exporter |
-| **Version** | 1.0 |
-| **Last Updated** | January 2026 |
-| **Repository** | https://github.com/mikedombo/xen-exporter |
+| **Repository** | https://github.com/bizanzio/xen-exporter |
+| **Upstream** | https://github.com/mikedombo/xen-exporter |
+| **Grafana Dashboard** | ID 16588 |
+| **Last Updated** | February 2026 |

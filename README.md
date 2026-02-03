@@ -1,166 +1,105 @@
 # xen-exporter
- XCP-ng (XenServer) Prometheus Exporter
 
-Automatically exports _all_ statistics from the [RRD metrics database](https://xapi-project.github.io/xen-api/metrics.html) from Xen.
+XCP-ng / XenServer Prometheus Exporter
 
-# Usage
+Automatically exports all statistics from the [RRD metrics database](https://xapi-project.github.io/xen-api/metrics.html) plus PBD and multipath status via XenAPI.
 
-```cmd
-docker run -e XEN_USER=root -e XEN_PASSWORD=<password> -e XEN_HOST=<host> -e XEN_SSL_VERIFY=true -p 9100:9100 --rm ghcr.io/mikedombo/xen-exporter:latest
+> **Fork of [mikedombo/xen-exporter](https://github.com/mikedombo/xen-exporter)** with additional features and improvements. See [Changes from Upstream](#changes-from-upstream).
+
+## Quick Start
+
+```bash
+docker run -e XEN_USER=root -e XEN_PASSWORD=<password> -e XEN_HOST=<host> \
+  -p 9100:9100 ghcr.io/mikedombo/xen-exporter:latest
 ```
 
-> HALT_ON_NO_UUID - optional, false by default. Ignores metrics with no UUID
+## Configuration
 
-> XEN_MODE - optional, "host" by default. "pool" if you want to parse all hosts from the pool
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `XEN_HOST` | `localhost` | XenServer host IP/hostname |
+| `XEN_USER` | `root` | XenServer username |
+| `XEN_PASSWORD` | `""` | XenServer password (required) |
+| `XEN_SSL_VERIFY` | `true` | Enable SSL certificate verification |
+| `XEN_MODE` | `host` | `host` for single host, `pool` for all pool members |
+| `XEN_COLLECT_PBD` | `true` | Collect PBD attachment status metrics |
+| `XEN_COLLECT_MULTIPATH` | `true` | Collect multipath status metrics |
+| `HALT_ON_NO_UUID` | `false` | Halt on missing UUID vs silent ignore |
+| `PORT` | `9100` | HTTP server port |
+| `BIND` | `0.0.0.0` | Network interface to bind |
 
-> XEN_COLLECT_PBD - optional, "true" by default. Collect PBD (Physical Block Device) attachment status metrics
+## Example Setup
 
-> XEN_COLLECT_MULTIPATH - optional, "true" by default. Collect multipath status metrics for hosts and SRs
-
-> PORT - optional, 9100 by default. HTTP server port for the metrics endpoint
-
-> BIND - optional, "0.0.0.0" by default. Network interface to bind to
-
-# Grafana
-A Grafana dashboard is [available here](https://grafana.com/grafana/dashboards/16588) (id 16588), which graphs most of the critical metrics
-gathered by this exporter.
-
-![Grafana dashboard sample 1](https://grafana.com/api/dashboards/16588/images/12479/image)
-![Grafana dashboard sample 2](https://grafana.com/api/dashboards/16588/images/12482/image)
-
-
-
-# Example setup for a XenServer cluster
-
-docker-compose.yml
-
+**docker-compose.yml**
 ```yaml
 services:
-  xen01:
-    container_name: xen01
+  xen-exporter:
     image: ghcr.io/mikedombo/xen-exporter:latest
     environment:
       - XEN_HOST=10.10.10.101
       - XEN_USER=root
-      - XEN_PASSWORD=s0m3f4ncyp4ssw0rd
+      - XEN_PASSWORD=mypassword
       - XEN_SSL_VERIFY=false
-
-  xen02:
-    container_name: xen02
-    image: ghcr.io/mikedombo/xen-exporter:latest
-    environment:
-      - XEN_HOST=10.10.10.102
-      - XEN_USER=root
-      - XEN_PASSWORD=s0m3f4ncyp4ssw0rd
-      - XEN_SSL_VERIFY=false
+    ports:
+      - "9100:9100"
 ```
 
-prometheus.yml
-
+**prometheus.yml**
 ```yaml
+scrape_configs:
   - job_name: xenserver
     scrape_interval: 60s
     scrape_timeout: 50s
     static_configs:
-    - targets:
-      - xen01:9100
-      - xen02:9100
+      - targets: ["xen-exporter:9100"]
 ```
 
-# Limitations
+## Grafana Dashboard
 
-When using a cluster, assumes that the username and password of the poolmaster and hosts are the same.
+A dashboard is [available here](https://grafana.com/grafana/dashboards/16588) (ID: 16588).
 
-If you use XEN_MODE=pool, you must have the same credentials for all hosts in your pool
+![Dashboard](https://grafana.com/api/dashboards/16588/images/12479/image)
 
-# TODO
-- Additional metrics beyond what RRD provides? Perhaps like https://github.com/lovoo/xenstats_exporter
-# List of all statistics
-<details>
+## Limitations
 
-- xen_host_avgqu_sz
-- xen_host_cpu
-- xen_host_cpu_avg
-- xen_host_cpu_avg_freq
-- xen_host_cpu_c0
-- xen_host_cpu_c1
-- xen_host_cpu_c2
-- xen_host_cpu_c3
-- xen_host_cpu_c4
-- xen_host_cpu_p0
-- xen_host_cpu_p1
-- xen_host_cpu_p2
-- xen_host_inflight
-- xen_host_io_throughput_read
-- xen_host_io_throughput_total
-- xen_host_io_throughput_write
-- xen_host_iops_read
-- xen_host_iops_total
-- xen_host_iops_write
-- xen_host_iowait
-- xen_host_latency
-- xen_host_loadavg
-- xen_host_hostload
-- xen_host_running_domains
-- xen_host_running_vcpus
-- xen_host_dcmi_power_reading
-- xen_host_memory_free_kib
-- xen_host_memory_reclaimed
-- xen_host_memory_reclaimed_max
-- xen_host_memory_total_kib
-- xen_host_pif_rx
-- xen_host_pif_tx
-- xen_host_pool_session_count
-- xen_host_pool_task_count
-- xen_host_read
-- xen_host_read_latency
-- xen_host_sr_cache_hits
-- xen_host_sr_cache_misses
-- xen_host_sr_cache_size
-- xen_host_tapdisks_in_low_memory_mode
-- xen_host_write
-- xen_host_write_latency
-- xen_host_xapi_allocation_kib
-- xen_host_xapi_free_memory_kib
-- xen_host_xapi_live_memory_kib
-- xen_host_xapi_memory_usage_kib
-- xen_host_xapi_open_fds
-- xen_host_xenopsd_xc_fdsize
-- xen_host_xenopsd_xc_mem_extra
-- xen_host_xenopsd_xc_ocaml_allocation_rate
-- xen_host_xenopsd_xc_ocaml_free
-- xen_host_xenopsd_xc_ocaml_maybe_live
-- xen_host_xenopsd_xc_ocaml_total
-- xen_host_xenopsd_xc_rss
-- xen_host_xenopsd_xc_threads
-- xen_host_xenopsd_xc_vmdata
-- xen_host_xenopsd_xc_vmlck
-- xen_host_xenopsd_xc_vmpin
-- xen_host_xenopsd_xc_vmpte
-- xen_host_xenopsd_xc_vmsize
-- xen_host_xenopsd_xc_vmstk
-- xen_host_multipath_enabled
-- xen_pbd_attached
-- xen_sr_multipath_active
-- xen_vm_cpu
-- xen_vm_memory
-- xen_vm_memory_internal_free
-- xen_vm_memory_target
-- xen_vm_vbd_avgqu_sz
-- xen_vm_vbd_inflight
-- xen_vm_vbd_io_throughput_read
-- xen_vm_vbd_io_throughput_total
-- xen_vm_vbd_io_throughput_write
-- xen_vm_vbd_iops_read
-- xen_vm_vbd_iops_total
-- xen_vm_vbd_iops_write
-- xen_vm_vbd_iowait
-- xen_vm_vbd_latency
-- xen_vm_vbd_read
-- xen_vm_vbd_read_latency
-- xen_vm_vbd_write
-- xen_vm_vbd_write_latency
-- xen_vm_vif_rx
-- xen_vm_vif_tx
-- xen_collector_duration_seconds
-</details>
+- Pool mode requires same credentials for all hosts
+- Assumes poolmaster and hosts share the same username/password
+
+## Changes from Upstream
+
+This fork includes significant improvements over the original [mikedombo/xen-exporter](https://github.com/mikedombo/xen-exporter):
+
+### New Features
+- **PBD monitoring** (`xen_pbd_attached`) - Detect storage disconnections
+- **Multipath monitoring** (`xen_host_multipath_enabled`, `xen_sr_multipath_active`)
+- **prometheus_client library** - Proper metric types, HELP/TYPE headers
+- **Xenopsd metrics** - 14 metrics for domain manager process monitoring
+- **Configurable PORT/BIND** - Customize HTTP server binding
+- **Environment validation** - Startup checks for required variables
+
+### Code Quality
+- Thread-safe global caches
+- HTTP request timeouts
+- Bounded cache sizes
+- Proper error handling and logging
+- Type annotations
+- Fixed variable shadowing issues
+
+### Documentation
+- Complete metrics reference with units and descriptions
+- PromQL query examples
+- Alerting rule examples
+- Security analysis and hardening recommendations
+
+## Documentation
+
+See [METRICS_REFERENCE.md](METRICS_REFERENCE.md) for:
+- Complete metrics list with descriptions
+- Label reference
+- PromQL query examples
+- Alerting rules
+- Architecture and security considerations
+
+## License
+
+BSD 2-Clause License
