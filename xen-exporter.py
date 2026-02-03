@@ -66,14 +66,16 @@ def get_all_hosts_in_pool(session):
 def lookup_vm_name(vm_uuid, session):
     try:
         return session.xenapi.VM.get_name_label(session.xenapi.VM.get_by_uuid(vm_uuid))
-    except XenAPI.XenAPI.Failure:
+    except XenAPI.XenAPI.Failure as e:
+        logging.debug("Failed to lookup VM name for %s: %s", vm_uuid, e)
         return vm_uuid
 
 
 def lookup_sr_name_by_uuid(sr_uuid, session):
     try:
         return session.xenapi.SR.get_name_label(session.xenapi.SR.get_by_uuid(sr_uuid))
-    except XenAPI.XenAPI.Failure:
+    except XenAPI.XenAPI.Failure as e:
+        logging.debug("Failed to lookup SR name for %s: %s", sr_uuid, e)
         return sr_uuid
 
 
@@ -82,12 +84,17 @@ def lookup_host_name(host_uuid, session):
         return session.xenapi.host.get_name_label(
             session.xenapi.host.get_by_uuid(host_uuid)
         )
-    except XenAPI.XenAPI.Failure:
+    except XenAPI.XenAPI.Failure as e:
+        logging.debug("Failed to lookup host name for %s: %s", host_uuid, e)
         return host_uuid
 
 
 def lookup_sr_uuid_by_ref(sr_ref, session):
-    return session.xenapi.SR.get_uuid(sr_ref)
+    try:
+        return session.xenapi.SR.get_uuid(sr_ref)
+    except XenAPI.XenAPI.Failure as e:
+        logging.debug("Failed to lookup SR UUID for ref %s: %s", sr_ref, e)
+        return sr_ref
 
 
 def find_full_sr_uuid(beginning_uuid, xen, halt_on_no_uuid):
