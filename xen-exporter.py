@@ -19,11 +19,11 @@ hosts = dict()
 all_srs = set()
 
 def get_all_hosts_in_pool(session):
-    list = []
+    host_addresses = []
     xen_hosts = session.xenapi.host.get_all()
     for host in xen_hosts:
-        list.append(session.xenapi.host.get_address(host))
-    return list
+        host_addresses.append(session.xenapi.host.get_address(host))
+    return host_addresses
 
 def lookup_vm_name(vm_uuid, session):
     try:
