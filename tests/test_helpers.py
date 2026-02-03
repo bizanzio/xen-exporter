@@ -21,6 +21,8 @@ lookup_sr_name_by_uuid = xen_exporter.lookup_sr_name_by_uuid
 lookup_host_name = xen_exporter.lookup_host_name
 find_full_sr_uuid = xen_exporter.find_full_sr_uuid
 _cleanup_cache_if_needed = xen_exporter._cleanup_cache_if_needed
+Xen = xen_exporter.Xen
+XENAPI_TIMEOUT_SECONDS = xen_exporter.XENAPI_TIMEOUT_SECONDS
 
 
 class TestGetOrSet:
@@ -179,6 +181,30 @@ class TestFindFullSRUUID:
 
         with pytest.raises(Exception, match='Found multiple SRs'):
             find_full_sr_uuid('12345678', session, halt_on_no_uuid=False)
+
+
+class TestXenSessionTimeout:
+    """Test the Xen session timeout functionality."""
+
+    def test_default_timeout_constant(self):
+        """Test that the default timeout constant is defined."""
+        assert XENAPI_TIMEOUT_SECONDS == 60
+
+    def test_timeout_restored_on_error(self):
+        """Test that socket timeout is restored after session creation failure."""
+        import socket as sock
+
+        original_timeout = sock.getdefaulttimeout()
+
+        # Attempt to create session with invalid URL (will fail)
+        try:
+            with Xen("https://invalid.host.local", "user", "pass", False):
+                pass
+        except Exception:
+            pass  # Expected to fail
+
+        # Timeout should be restored
+        assert sock.getdefaulttimeout() == original_timeout
 
 
 class TestCacheCleanup:

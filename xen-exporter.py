@@ -2,6 +2,7 @@ import base64
 import logging
 import shlex
 import signal
+import socket
 import sys
 import urllib.request
 import time
@@ -29,6 +30,7 @@ DEFAULT_PORT = 9100
 DEFAULT_BIND_ADDRESS = "0.0.0.0"
 SHORT_SR_UUID_LENGTH = 8  # Expected length of abbreviated SR UUIDs
 HTTP_TIMEOUT_SECONDS = 30  # Timeout for HTTP requests to Xen hosts
+XENAPI_TIMEOUT_SECONDS = 60  # Timeout for XenAPI operations
 CACHE_MAX_SIZE = 10000  # Maximum entries per cache before cleanup
 
 # We aggressively cache the SRs, VMs, and hosts to avoid calling XAPI which can double the runtime (~0.8s to ~1.5s)
@@ -802,17 +804,41 @@ def collect_poolmaster(
 
 
 class Xen:
-    def __init__(self, url, username, password, verify_ssl):
-        self.session = XenAPI.Session(url, ignore_ssl=not verify_ssl)
-        self.session.xenapi.login_with_password(
-            username, password, "1.0", "xen-exporter"
-        )
+    """Context manager for XenAPI sessions with timeout support.
+
+    Sets a socket timeout during session operations to prevent indefinite
+    blocking when XenServer is unresponsive.
+    """
+
+    def __init__(self, url, username, password, verify_ssl, timeout=XENAPI_TIMEOUT_SECONDS):
+        self.timeout = timeout
+        self._previous_timeout = None
+
+        # Set timeout before creating session
+        self._previous_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(self.timeout)
+
+        try:
+            self.session = XenAPI.Session(url, ignore_ssl=not verify_ssl)
+            self.session.xenapi.login_with_password(
+                username, password, "1.0", "xen-exporter"
+            )
+        except Exception:
+            # Restore timeout on error
+            socket.setdefaulttimeout(self._previous_timeout)
+            raise
 
     def __enter__(self):
         return self.session
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.session.xenapi.session.logout()
+        try:
+            self.session.xenapi.session.logout()
+        except Exception as e:
+            logging.debug("Error during session logout: %s", e)
+        finally:
+            # Always restore the previous timeout
+            socket.setdefaulttimeout(self._previous_timeout)
         return False
 
 
