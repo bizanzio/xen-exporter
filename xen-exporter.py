@@ -340,6 +340,9 @@ def collect_metrics():
 
             for i, metric_name in enumerate(metrics["meta"]["legend"]):
                 metric_legend = metric_name.split(":")[1:]
+                if len(metric_legend) < 3:
+                    logging.warning("Invalid metric legend format (expected 3+ parts): %s", metric_name)
+                    continue
                 collector_type = metric_legend[0]
                 collector = metric_legend[1]
                 metric_type = metric_legend[2]
@@ -355,6 +358,8 @@ def collect_metrics():
 
             for i, metric_name in enumerate(metrics["meta"]["legend"]):
                 metric_legend = metric_name.split(":")[1:]
+                if len(metric_legend) < 3:
+                    continue  # Already logged in the first loop
                 collector_type = metric_legend[0]
                 collector = metric_legend[1]
                 metric_type = metric_legend[2]
