@@ -8,7 +8,7 @@ STOPSIGNAL SIGINT
 
 # Setup the running user
 RUN addgroup --gid 10001 xenexporter && \
-    adduser --uid 10001 xenexporter --gid 1001
+    adduser --uid 10001 xenexporter --gid 10001
 
 # Install dependencies
 COPY --chown=0:0 --chmod=0644 ./requirements.txt /app/requirements.txt
