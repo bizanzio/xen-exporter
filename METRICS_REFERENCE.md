@@ -93,6 +93,24 @@ This document provides a complete reference of all metrics exported by xen-expor
 | `xen_host_xapi_memory_usage_kib` | Gauge | KiB | XAPI memory usage |
 | `xen_host_xapi_open_fds` | Gauge | Count | XAPI open file descriptors |
 
+#### Xenopsd Metrics
+| Metric | Type | Unit | Description |
+|--------|------|------|-------------|
+| `xen_host_xenopsd_xc_fdsize` | Gauge | Count | Xenopsd XC file descriptor table size |
+| `xen_host_xenopsd_xc_mem_extra` | Gauge | KiB | Xenopsd XC extra memory |
+| `xen_host_xenopsd_xc_ocaml_allocation_rate` | Gauge | Rate | Xenopsd XC OCaml heap allocation rate |
+| `xen_host_xenopsd_xc_ocaml_free` | Gauge | KiB | Xenopsd XC OCaml free heap memory |
+| `xen_host_xenopsd_xc_ocaml_maybe_live` | Gauge | KiB | Xenopsd XC OCaml maybe live memory |
+| `xen_host_xenopsd_xc_ocaml_total` | Gauge | KiB | Xenopsd XC OCaml total heap size |
+| `xen_host_xenopsd_xc_rss` | Gauge | KiB | Xenopsd XC resident set size |
+| `xen_host_xenopsd_xc_threads` | Gauge | Count | Xenopsd XC number of threads |
+| `xen_host_xenopsd_xc_vmdata` | Gauge | KiB | Xenopsd XC virtual memory data segment |
+| `xen_host_xenopsd_xc_vmlck` | Gauge | KiB | Xenopsd XC locked virtual memory |
+| `xen_host_xenopsd_xc_vmpin` | Gauge | KiB | Xenopsd XC pinned virtual memory |
+| `xen_host_xenopsd_xc_vmpte` | Gauge | Count | Xenopsd XC page table entries |
+| `xen_host_xenopsd_xc_vmsize` | Gauge | KiB | Xenopsd XC total virtual memory size |
+| `xen_host_xenopsd_xc_vmstk` | Gauge | KiB | Xenopsd XC stack size |
+
 #### Pool Metrics
 | Metric | Type | Unit | Description |
 |--------|------|------|-------------|
