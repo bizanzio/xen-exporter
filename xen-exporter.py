@@ -363,7 +363,9 @@ def collect_metrics():
                 ),
             )
             res = urllib.request.urlopen(
-                req, context=None if verify_ssl else ssl._create_unverified_context()
+                req,
+                context=None if verify_ssl else ssl._create_unverified_context(),
+                timeout=HTTP_TIMEOUT_SECONDS
             )
             metrics = pyjson5.decode_io(res)
 
