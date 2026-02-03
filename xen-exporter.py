@@ -295,24 +295,22 @@ class Xen:
 
 
 # Known SR metrics whose legends include the beginning of the UUID, rather than the full UUID
-sr_metrics = set(
-    [
-        "io_throughput_total",
-        "avgqu_sz",
-        "inflight",
-        "iops_write",
-        "iops_total",
-        "io_throughput_read",
-        "read",
-        "latency",
-        "write_latency",
-        "write",
-        "io_throughput_write",
-        "iowait",
-        "read_latency",
-        "iops_read",
-    ]
-)
+sr_metrics = {
+    "io_throughput_total",
+    "avgqu_sz",
+    "inflight",
+    "iops_write",
+    "iops_total",
+    "io_throughput_read",
+    "read",
+    "latency",
+    "write_latency",
+    "write",
+    "io_throughput_write",
+    "iowait",
+    "read_latency",
+    "iops_read",
+}
 
 
 def parse_bool_env(env_var: str, default: bool = False) -> bool:
