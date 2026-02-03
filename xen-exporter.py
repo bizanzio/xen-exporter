@@ -13,7 +13,7 @@ from typing import Optional
 
 import pyjson5
 import XenAPI
-from prometheus_client import REGISTRY, start_http_server, Histogram
+from prometheus_client import REGISTRY, start_http_server, Histogram, Counter
 from prometheus_client.core import GaugeMetricFamily
 
 # Configure logging
@@ -69,6 +69,69 @@ def _create_scrape_histogram():
 
 
 SCRAPE_DURATION_HISTOGRAM = _create_scrape_histogram()
+
+
+# Error types for categorizing scrape failures
+ERROR_TYPE_CONNECTION = 'connection'  # Network connectivity issues
+ERROR_TYPE_AUTH = 'authentication'     # Authentication failures
+ERROR_TYPE_TIMEOUT = 'timeout'         # Request timeouts
+ERROR_TYPE_PARSE = 'parse'             # Response parsing errors
+ERROR_TYPE_API = 'api'                 # XenAPI errors
+ERROR_TYPE_UNKNOWN = 'unknown'         # Uncategorized errors
+
+
+def _create_error_counter():
+    """Create the scrape error counter, handling re-registration gracefully."""
+    try:
+        return Counter(
+            'xen_scrape_errors_total',
+            'Total number of scrape errors by type',
+            ['error_type']
+        )
+    except ValueError:
+        # Already registered (happens during testing when module is reloaded)
+        # For Counter, the _name is without the _total suffix
+        for collector in REGISTRY._names_to_collectors.values():
+            if hasattr(collector, '_name') and collector._name == 'xen_scrape_errors':
+                return collector
+        raise
+
+
+SCRAPE_ERROR_COUNTER = _create_error_counter()
+
+
+def classify_error(exception: Exception) -> str:
+    """Classify an exception into an error type category."""
+    error_str = str(exception).lower()
+    error_type = type(exception).__name__
+
+    # Connection errors
+    if any(x in error_type.lower() for x in ['connection', 'socket', 'urlopen']):
+        return ERROR_TYPE_CONNECTION
+    if any(x in error_str for x in ['connection refused', 'network unreachable',
+                                     'no route to host', 'name or service not known']):
+        return ERROR_TYPE_CONNECTION
+
+    # Timeout errors
+    if 'timeout' in error_type.lower() or 'timeout' in error_str:
+        return ERROR_TYPE_TIMEOUT
+
+    # Authentication errors
+    if any(x in error_str for x in ['401', 'unauthorized', 'authentication',
+                                     'permission denied', 'access denied', 'login']):
+        return ERROR_TYPE_AUTH
+    if 'XenAPI.Failure' in error_type and 'session' in error_str.lower():
+        return ERROR_TYPE_AUTH
+
+    # Parse errors
+    if any(x in error_type.lower() for x in ['json', 'decode', 'parse', 'value']):
+        return ERROR_TYPE_PARSE
+
+    # XenAPI errors
+    if 'xenapi' in error_type.lower() or 'xenapi' in error_str:
+        return ERROR_TYPE_API
+
+    return ERROR_TYPE_UNKNOWN
 
 
 # =============================================================================
@@ -292,6 +355,10 @@ class XenCollector:
         except Exception as e:
             logging.error("Error during metric collection: %s", e)
             scrape_success = False
+            # Classify and count the error
+            error_type = classify_error(e)
+            SCRAPE_ERROR_COUNTER.labels(error_type=error_type).inc()
+            logging.debug("Error classified as: %s", error_type)
             # Continue to yield whatever metrics we collected
 
         # Record collection duration

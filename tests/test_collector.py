@@ -18,6 +18,14 @@ spec.loader.exec_module(xen_exporter)
 XenCollector = xen_exporter.XenCollector
 METRIC_DEFINITIONS = xen_exporter.METRIC_DEFINITIONS
 SCRAPE_DURATION_HISTOGRAM = xen_exporter.SCRAPE_DURATION_HISTOGRAM
+SCRAPE_ERROR_COUNTER = xen_exporter.SCRAPE_ERROR_COUNTER
+classify_error = xen_exporter.classify_error
+ERROR_TYPE_CONNECTION = xen_exporter.ERROR_TYPE_CONNECTION
+ERROR_TYPE_AUTH = xen_exporter.ERROR_TYPE_AUTH
+ERROR_TYPE_TIMEOUT = xen_exporter.ERROR_TYPE_TIMEOUT
+ERROR_TYPE_PARSE = xen_exporter.ERROR_TYPE_PARSE
+ERROR_TYPE_API = xen_exporter.ERROR_TYPE_API
+ERROR_TYPE_UNKNOWN = xen_exporter.ERROR_TYPE_UNKNOWN
 
 
 class TestXenCollectorInit:
@@ -135,6 +143,64 @@ class TestMetricStorage:
         assert len(collected['host_cpu']) == 2
         assert collected['host_cpu'][('host1', 'uuid-1', '0')] == 0.25
         assert collected['host_cpu'][('host1', 'uuid-1', '1')] == 0.50
+
+
+class TestErrorClassification:
+    """Test error classification logic."""
+
+    def test_connection_error_by_type(self):
+        """Test that connection-related exceptions are classified correctly."""
+        from socket import error as SocketError
+        err = SocketError("Connection refused")
+        assert classify_error(err) == ERROR_TYPE_CONNECTION
+
+    def test_connection_error_by_message(self):
+        """Test that connection errors are detected by message."""
+        err = Exception("Could not connect: connection refused")
+        assert classify_error(err) == ERROR_TYPE_CONNECTION
+
+    def test_timeout_error(self):
+        """Test that timeout errors are classified correctly."""
+        from socket import timeout
+        err = timeout("timed out")
+        assert classify_error(err) == ERROR_TYPE_TIMEOUT
+
+    def test_timeout_error_by_message(self):
+        """Test that timeout errors are detected by message."""
+        err = Exception("Request timeout after 30 seconds")
+        assert classify_error(err) == ERROR_TYPE_TIMEOUT
+
+    def test_auth_error(self):
+        """Test that authentication errors are classified correctly."""
+        err = Exception("HTTP 401 Unauthorized")
+        assert classify_error(err) == ERROR_TYPE_AUTH
+
+    def test_parse_error(self):
+        """Test that parse errors are classified correctly."""
+        import json
+        try:
+            json.loads("invalid json")
+        except json.JSONDecodeError as e:
+            assert classify_error(e) == ERROR_TYPE_PARSE
+
+    def test_unknown_error(self):
+        """Test that unrecognized errors are classified as unknown."""
+        err = Exception("Something completely unexpected happened")
+        assert classify_error(err) == ERROR_TYPE_UNKNOWN
+
+
+class TestErrorCounter:
+    """Test the error counter metric."""
+
+    def test_error_counter_exists(self):
+        """Test that the error counter is defined."""
+        assert SCRAPE_ERROR_COUNTER is not None
+        # Counter internally uses name without _total suffix
+        assert SCRAPE_ERROR_COUNTER._name == 'xen_scrape_errors'
+
+    def test_error_counter_has_error_type_label(self):
+        """Test that error counter has error_type label."""
+        assert 'error_type' in SCRAPE_ERROR_COUNTER._labelnames
 
 
 class TestScrapeHistogram:
