@@ -449,9 +449,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(metric_output)
         except BaseException:
-            print(traceback.format_exc(), flush=True)
+            error_msg = traceback.format_exc()
+            logging.error("Error collecting metrics: %s", error_msg)
             self.send_response(500)
+            self.send_header("Content-type", "text/plain")
             self.end_headers()
+            self.wfile.write(b"Internal Server Error\n")
 
 
 if __name__ == "__main__":
