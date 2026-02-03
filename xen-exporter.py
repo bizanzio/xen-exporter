@@ -376,11 +376,14 @@ def collect_metrics():
                     extra_tags['host_uuid'] = host_uuid
 
                 if collector_type == "host" and "sr_" in metric_type:
-                    x = metric_type.split("sr_")[1]
-                    sr = get_or_set(srs, x.split("_")[0], lookup_sr_name_by_uuid, xen)
-                    extra_tags["sr"] = sr
-                    extra_tags["sr_uuid"] = x.split("_")[0]
-                    metric_type = "sr_" + "_".join(x.split("_")[1:])
+                    sr_parts = metric_type.split("sr_", 1)
+                    if len(sr_parts) > 1 and sr_parts[1]:
+                        x = sr_parts[1]
+                        x_parts = x.split("_")
+                        sr = get_or_set(srs, x_parts[0], lookup_sr_name_by_uuid, xen)
+                        extra_tags["sr"] = sr
+                        extra_tags["sr_uuid"] = x_parts[0]
+                        metric_type = "sr_" + "_".join(x_parts[1:])
 
                 # Handle SR metrics which don't have a full UUID (and don't have sr_)
                 if (
@@ -397,32 +400,44 @@ def collect_metrics():
                     metric_type = "_".join(metric_type.split("_")[0:-1])
 
                 if collector_type == "vm" and "vbd_" in metric_type:
-                    x = metric_type.split("vbd_")[1]
-                    extra_tags["vbd"] = x.split("_")[0]
-                    metric_type = "vbd_" + "_".join(x.split("_")[1:])
+                    vbd_parts = metric_type.split("vbd_", 1)
+                    if len(vbd_parts) > 1 and vbd_parts[1]:
+                        x_parts = vbd_parts[1].split("_")
+                        extra_tags["vbd"] = x_parts[0]
+                        metric_type = "vbd_" + "_".join(x_parts[1:])
 
                 if collector_type == "vm" and "vif_" in metric_type:
-                    x = metric_type.split("vif_")[1]
-                    extra_tags["vif"] = x.split("_")[0]
-                    metric_type = "vif_" + "_".join(x.split("_")[1:])
+                    vif_parts = metric_type.split("vif_", 1)
+                    if len(vif_parts) > 1 and vif_parts[1]:
+                        x_parts = vif_parts[1].split("_")
+                        extra_tags["vif"] = x_parts[0]
+                        metric_type = "vif_" + "_".join(x_parts[1:])
 
                 if collector_type == "host" and "pif_" in metric_type:
-                    x = metric_type.split("pif_")[1]
-                    extra_tags["pif"] = x.split("_")[0]
-                    metric_type = "pif_" + "_".join(x.split("_")[1:])
+                    pif_parts = metric_type.split("pif_", 1)
+                    if len(pif_parts) > 1 and pif_parts[1]:
+                        x_parts = pif_parts[1].split("_")
+                        extra_tags["pif"] = x_parts[0]
+                        metric_type = "pif_" + "_".join(x_parts[1:])
 
                 if "cpu" in metric_type:
-                    x = metric_type.split("cpu")[1]
-                    if x.isnumeric():
-                        extra_tags["cpu"] = x
-                        metric_type = "cpu"
-                    elif "-" in x:
-                        extra_tags["cpu"] = x.split("-")[0]
-                        metric_type = "cpu_" + x.split("-")[1]
+                    cpu_parts = metric_type.split("cpu", 1)
+                    if len(cpu_parts) > 1 and cpu_parts[1]:
+                        x = cpu_parts[1]
+                        if x.isnumeric():
+                            extra_tags["cpu"] = x
+                            metric_type = "cpu"
+                        elif "-" in x:
+                            x_parts = x.split("-", 1)
+                            extra_tags["cpu"] = x_parts[0]
+                            metric_type = "cpu_" + x_parts[1] if len(x_parts) > 1 else "cpu"
                 if "CPU" in metric_type:
-                    x = metric_type.split("CPU")[1]
-                    extra_tags["cpu"] = x.split("-")[0]
-                    metric_type = "cpu_" + "_".join(x.split("-")[1:])
+                    cpu_parts = metric_type.split("CPU", 1)
+                    if len(cpu_parts) > 1 and cpu_parts[1]:
+                        x = cpu_parts[1]
+                        x_parts = x.split("-")
+                        extra_tags["cpu"] = x_parts[0]
+                        metric_type = "cpu_" + "_".join(x_parts[1:]) if len(x_parts) > 1 else "cpu"
 
                 # Normalize metric names to lowercase and underscores
                 metric_type = metric_type.lower().replace("-", "_")
