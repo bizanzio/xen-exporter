@@ -21,6 +21,13 @@ logging.basicConfig(
 )
 
 
+# Configuration constants
+DEFAULT_METRICS_WINDOW_SECONDS = 10  # Time window for RRD updates
+DEFAULT_PORT = 9100
+DEFAULT_BIND_ADDRESS = "0.0.0.0"
+SHORT_SR_UUID_LENGTH = 8  # Expected length of abbreviated SR UUIDs
+HTTP_TIMEOUT_SECONDS = 30  # Timeout for HTTP requests to Xen hosts
+
 # We aggressively cache the SRs, VMs, and hosts to avoid calling XAPI which can double the runtime (~0.8s to ~1.5s)
 # Mapping from UUID to human readable name
 # Thread lock to protect cache access from concurrent HTTP requests
@@ -323,7 +330,7 @@ def collect_metrics():
         for current_host in xen_hosts:
             host_name = None
             host_uuid = None
-            url = f"https://{current_host}/rrd_updates?start={int(time.time()-10)}&json=true&host=true&cf=AVERAGE"
+            url = f"https://{current_host}/rrd_updates?start={int(time.time()-DEFAULT_METRICS_WINDOW_SECONDS)}&json=true&host=true&cf=AVERAGE"
 
             req = urllib.request.Request(url)
             req.add_header(
@@ -388,7 +395,7 @@ def collect_metrics():
                 # Handle SR metrics which don't have a full UUID (and don't have sr_)
                 if (
                     collector_type == "host"
-                    and len(metric_type.split("_")[-1]) == 8
+                    and len(metric_type.split("_")[-1]) == SHORT_SR_UUID_LENGTH
                     and "_".join(metric_type.split("_")[0:-1]) in sr_metrics
                 ):
                     short_sr = metric_type.split("_")[-1]
@@ -480,8 +487,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    port = os.getenv("PORT", "9100")
-    bind = os.getenv("BIND", "0.0.0.0")
+    port = os.getenv("PORT", str(DEFAULT_PORT))
+    bind = os.getenv("BIND", DEFAULT_BIND_ADDRESS)
 
     if os.getenv("XEN_MODE"):
         if os.getenv("XEN_MODE", "host") != "host" and os.getenv("XEN_MODE", "host") != "pool":
