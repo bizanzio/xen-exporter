@@ -14,7 +14,8 @@ from typing import Optional
 
 import pyjson5
 import XenAPI
-from prometheus_client import REGISTRY, start_http_server, Histogram, Counter
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from prometheus_client import REGISTRY, Histogram, Counter, generate_latest, CONTENT_TYPE_LATEST
 from prometheus_client.core import GaugeMetricFamily
 
 # Configure logging
@@ -927,6 +928,117 @@ def get_host_credentials(
 
 
 
+def check_xen_connectivity():
+    """
+    Check if we can connect to XenServer.
+
+    Returns:
+        tuple: (success: bool, message: str)
+    """
+    xen_user = os.getenv("XEN_USER", "root")
+    xen_password = os.getenv("XEN_PASSWORD", "")
+    xen_host = os.getenv("XEN_HOST", "localhost")
+    xen_credentials = os.getenv("XEN_CREDENTIALS")
+    verify_ssl = parse_bool_env("XEN_SSL_VERIFY", default=True)
+
+    host_credentials = parse_credentials(xen_credentials, xen_user, xen_password)
+
+    try:
+        poolmaster_user, poolmaster_pass = get_host_credentials(
+            xen_host, host_credentials, xen_user, xen_password
+        )
+
+        xen_poolmaster = collect_poolmaster(
+            xen_user=poolmaster_user,
+            xen_password=poolmaster_pass,
+            xen_host=xen_host,
+            verify_ssl=verify_ssl,
+        )
+
+        poolmaster_user, poolmaster_pass = get_host_credentials(
+            xen_poolmaster, host_credentials, xen_user, xen_password
+        )
+
+        # Quick connectivity check - just login and logout
+        with Xen("https://" + xen_poolmaster, poolmaster_user, poolmaster_pass, verify_ssl, timeout=10):
+            pass
+
+        return True, "Connected to XenServer"
+
+    except Exception as e:
+        error_type = classify_error(e)
+        return False, f"Cannot connect to XenServer: {error_type} - {str(e)}"
+
+
+class MetricsHandler(BaseHTTPRequestHandler):
+    """HTTP handler for metrics, health, and readiness endpoints."""
+
+    # Class-level collector reference (set during server setup)
+    collector = None
+
+    def log_message(self, format: str, *args) -> None:
+        """Override to use our configured logger instead of stderr."""
+        logging.info("%s - %s", self.address_string(), format % args)
+
+    def do_GET(self):
+        """Handle GET requests for all endpoints."""
+        if self.path == '/health':
+            self._handle_health()
+        elif self.path == '/ready':
+            self._handle_ready()
+        elif self.path in ('/', '/metrics'):
+            self._handle_metrics()
+        else:
+            self._send_response(404, 'text/plain', b'Not Found\n')
+
+    def _handle_health(self):
+        """Handle /health endpoint - basic liveness check."""
+        self._send_response(200, 'text/plain', b'OK\n')
+
+    def _handle_ready(self):
+        """Handle /ready endpoint - check XenServer connectivity."""
+        success, message = check_xen_connectivity()
+        status = 200 if success else 503
+        self._send_response(status, 'text/plain', (message + '\n').encode('utf-8'))
+
+    def _handle_metrics(self):
+        """Handle /metrics endpoint - Prometheus metrics."""
+        try:
+            output = generate_latest(REGISTRY)
+            self._send_response(200, CONTENT_TYPE_LATEST, output)
+        except Exception as e:
+            logging.error("Error generating metrics: %s", e)
+            self._send_response(500, 'text/plain', b'Internal Server Error\n')
+
+    def _send_response(self, status: int, content_type: str, body: bytes):
+        """Send an HTTP response."""
+        self.send_response(status)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class ThreadedHTTPServer(HTTPServer):
+    """HTTP server that handles each request in a separate thread."""
+
+    def process_request(self, request, client_address):
+        """Start a new thread for each request."""
+        thread = threading.Thread(target=self._handle_request_thread,
+                                  args=(request, client_address))
+        thread.daemon = True
+        thread.start()
+
+    def _handle_request_thread(self, request, client_address):
+        """Handle a request in a separate thread."""
+        try:
+            self.finish_request(request, client_address)
+        except Exception:
+            self.handle_error(request, client_address)
+        finally:
+            self.shutdown_request(request)
+
+
 def validate_config():
     """Validate environment variables at startup."""
     errors = []
@@ -971,9 +1083,10 @@ def main():
     # Register the XenCollector with the global registry
     REGISTRY.register(XenCollector())
 
-    # Start the HTTP server (threaded, handles concurrent requests)
+    # Create and start the threaded HTTP server
     logging.info("Starting xen-exporter on %s:%s", bind, port)
-    start_http_server(port, addr=bind)
+    logging.info("Endpoints: /metrics, /health, /ready")
+    server = ThreadedHTTPServer((bind, port), MetricsHandler)
 
     # Set up signal handlers for graceful shutdown
     shutdown_event = threading.Event()
@@ -982,9 +1095,15 @@ def main():
         signame = signal.Signals(signum).name
         logging.info("Received %s, shutting down...", signame)
         shutdown_event.set()
+        server.shutdown()
 
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
+
+    # Start server in a separate thread
+    server_thread = threading.Thread(target=server.serve_forever)
+    server_thread.daemon = True
+    server_thread.start()
 
     # Wait for shutdown signal
     logging.info("Exporter is ready. Press Ctrl+C to stop.")
