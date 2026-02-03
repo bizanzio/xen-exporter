@@ -131,7 +131,7 @@ def collect_poolmaster(
     xen_user: str, xen_password: str, xen_host: str, verify_ssl: bool
 ):
     try:
-        with Xen("https://" + xen_host, xen_user, xen_password, verify_ssl) as xen:
+        with Xen("https://" + xen_host, xen_user, xen_password, verify_ssl):
             poolmaster = xen_host
     except XenAPI.XenAPI.Failure as e:
         ipPattern = re.compile(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}")
