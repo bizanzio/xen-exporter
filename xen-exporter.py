@@ -15,11 +15,12 @@ from typing import Any, Optional
 import pyjson5
 import XenAPI
 from prometheus_client import (
-    CollectorRegistry,
+    REGISTRY,
     Gauge,
     generate_latest,
     CONTENT_TYPE_LATEST,
 )
+from prometheus_client.core import GaugeMetricFamily
 
 # Configure logging
 logging.basicConfig(
@@ -47,623 +48,550 @@ all_srs = set()
 
 
 # =============================================================================
-# Prometheus Metrics Registry
+# Metric Definitions
 # =============================================================================
 
-# Create a custom registry for all xen metrics
-# Using a custom registry allows us to clear and rebuild metrics on each scrape
-def create_metrics_registry():
-    """Create a fresh CollectorRegistry with all metric definitions."""
-    registry = CollectorRegistry()
+# Metric definitions: (metric_key, prometheus_name, help_text, label_names)
+# These define all known metrics that the collector can emit
 
-    metrics = {}
-
-    # -------------------------------------------------------------------------
+METRIC_DEFINITIONS = {
     # Host CPU Metrics
-    # -------------------------------------------------------------------------
-    metrics['host_cpu'] = Gauge(
-        'xen_host_cpu',
-        'CPU utilization per core (0-1 ratio)',
-        ['host', 'host_uuid', 'cpu'],
-        registry=registry
-    )
-    metrics['host_cpu_avg'] = Gauge(
-        'xen_host_cpu_avg',
-        'Average CPU utilization across all cores (0-1 ratio)',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_cpu_avg_freq'] = Gauge(
-        'xen_host_cpu_avg_freq',
-        'Average CPU frequency in Hz',
-        ['host', 'host_uuid', 'cpu'],
-        registry=registry
-    )
-    metrics['host_cpu_c0'] = Gauge(
-        'xen_host_cpu_c0',
-        'CPU C0 (active) state time ratio',
-        ['host', 'host_uuid', 'cpu'],
-        registry=registry
-    )
-    metrics['host_cpu_c1'] = Gauge(
-        'xen_host_cpu_c1',
-        'CPU C1 (halt) state time ratio',
-        ['host', 'host_uuid', 'cpu'],
-        registry=registry
-    )
-    metrics['host_cpu_p0'] = Gauge(
-        'xen_host_cpu_p0',
-        'CPU P0 power state time ratio',
-        ['host', 'host_uuid', 'cpu'],
-        registry=registry
-    )
-    metrics['host_cpu_p1'] = Gauge(
-        'xen_host_cpu_p1',
-        'CPU P1 power state time ratio',
-        ['host', 'host_uuid', 'cpu'],
-        registry=registry
-    )
-    metrics['host_cpu_p2'] = Gauge(
-        'xen_host_cpu_p2',
-        'CPU P2 power state time ratio',
-        ['host', 'host_uuid', 'cpu'],
-        registry=registry
-    )
-    metrics['host_cpu_c2'] = Gauge(
-        'xen_host_cpu_c2',
-        'CPU C2 state time ratio',
-        ['host', 'host_uuid', 'cpu'],
-        registry=registry
-    )
-    metrics['host_cpu_c3'] = Gauge(
-        'xen_host_cpu_c3',
-        'CPU C3 state time ratio',
-        ['host', 'host_uuid', 'cpu'],
-        registry=registry
-    )
-    metrics['host_cpu_c4'] = Gauge(
-        'xen_host_cpu_c4',
-        'CPU C4 state time ratio',
-        ['host', 'host_uuid', 'cpu'],
-        registry=registry
-    )
+    'host_cpu': ('xen_host_cpu', 'CPU utilization per core (0-1 ratio)', ['host', 'host_uuid', 'cpu']),
+    'host_cpu_avg': ('xen_host_cpu_avg', 'Average CPU utilization across all cores (0-1 ratio)', ['host', 'host_uuid']),
+    'host_cpu_avg_freq': ('xen_host_cpu_avg_freq', 'Average CPU frequency in Hz', ['host', 'host_uuid', 'cpu']),
+    'host_cpu_c0': ('xen_host_cpu_c0', 'CPU C0 (active) state time ratio', ['host', 'host_uuid', 'cpu']),
+    'host_cpu_c1': ('xen_host_cpu_c1', 'CPU C1 (halt) state time ratio', ['host', 'host_uuid', 'cpu']),
+    'host_cpu_c2': ('xen_host_cpu_c2', 'CPU C2 state time ratio', ['host', 'host_uuid', 'cpu']),
+    'host_cpu_c3': ('xen_host_cpu_c3', 'CPU C3 state time ratio', ['host', 'host_uuid', 'cpu']),
+    'host_cpu_c4': ('xen_host_cpu_c4', 'CPU C4 state time ratio', ['host', 'host_uuid', 'cpu']),
+    'host_cpu_p0': ('xen_host_cpu_p0', 'CPU P0 power state time ratio', ['host', 'host_uuid', 'cpu']),
+    'host_cpu_p1': ('xen_host_cpu_p1', 'CPU P1 power state time ratio', ['host', 'host_uuid', 'cpu']),
+    'host_cpu_p2': ('xen_host_cpu_p2', 'CPU P2 power state time ratio', ['host', 'host_uuid', 'cpu']),
 
-    # -------------------------------------------------------------------------
     # Host Memory Metrics
-    # -------------------------------------------------------------------------
-    metrics['host_memory_free_kib'] = Gauge(
-        'xen_host_memory_free_kib',
-        'Free memory on host in KiB',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_memory_total_kib'] = Gauge(
-        'xen_host_memory_total_kib',
-        'Total memory on host in KiB',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_memory_reclaimed'] = Gauge(
-        'xen_host_memory_reclaimed',
-        'Memory reclaimed from VMs in bytes',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_memory_reclaimed_max'] = Gauge(
-        'xen_host_memory_reclaimed_max',
-        'Maximum reclaimable memory in bytes',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
+    'host_memory_free_kib': ('xen_host_memory_free_kib', 'Free memory on host in KiB', ['host', 'host_uuid']),
+    'host_memory_total_kib': ('xen_host_memory_total_kib', 'Total memory on host in KiB', ['host', 'host_uuid']),
+    'host_memory_reclaimed': ('xen_host_memory_reclaimed', 'Memory reclaimed from VMs in bytes', ['host', 'host_uuid']),
+    'host_memory_reclaimed_max': ('xen_host_memory_reclaimed_max', 'Maximum reclaimable memory in bytes', ['host', 'host_uuid']),
 
-    # -------------------------------------------------------------------------
     # Host Disk I/O Metrics
-    # -------------------------------------------------------------------------
-    metrics['host_read'] = Gauge(
-        'xen_host_read',
-        'Disk read operations per second',
-        ['host', 'host_uuid', 'sr', 'sr_uuid'],
-        registry=registry
-    )
-    metrics['host_write'] = Gauge(
-        'xen_host_write',
-        'Disk write operations per second',
-        ['host', 'host_uuid', 'sr', 'sr_uuid'],
-        registry=registry
-    )
-    metrics['host_read_latency'] = Gauge(
-        'xen_host_read_latency',
-        'Disk read latency in seconds',
-        ['host', 'host_uuid', 'sr', 'sr_uuid'],
-        registry=registry
-    )
-    metrics['host_write_latency'] = Gauge(
-        'xen_host_write_latency',
-        'Disk write latency in seconds',
-        ['host', 'host_uuid', 'sr', 'sr_uuid'],
-        registry=registry
-    )
-    metrics['host_latency'] = Gauge(
-        'xen_host_latency',
-        'Overall disk latency in seconds',
-        ['host', 'host_uuid', 'sr', 'sr_uuid'],
-        registry=registry
-    )
-    metrics['host_iops_read'] = Gauge(
-        'xen_host_iops_read',
-        'Disk read IOPS',
-        ['host', 'host_uuid', 'sr', 'sr_uuid'],
-        registry=registry
-    )
-    metrics['host_iops_write'] = Gauge(
-        'xen_host_iops_write',
-        'Disk write IOPS',
-        ['host', 'host_uuid', 'sr', 'sr_uuid'],
-        registry=registry
-    )
-    metrics['host_iops_total'] = Gauge(
-        'xen_host_iops_total',
-        'Total disk IOPS',
-        ['host', 'host_uuid', 'sr', 'sr_uuid'],
-        registry=registry
-    )
-    metrics['host_io_throughput_read'] = Gauge(
-        'xen_host_io_throughput_read',
-        'Disk read throughput in bytes/sec',
-        ['host', 'host_uuid', 'sr', 'sr_uuid'],
-        registry=registry
-    )
-    metrics['host_io_throughput_write'] = Gauge(
-        'xen_host_io_throughput_write',
-        'Disk write throughput in bytes/sec',
-        ['host', 'host_uuid', 'sr', 'sr_uuid'],
-        registry=registry
-    )
-    metrics['host_io_throughput_total'] = Gauge(
-        'xen_host_io_throughput_total',
-        'Total disk I/O throughput in bytes/sec',
-        ['host', 'host_uuid', 'sr', 'sr_uuid'],
-        registry=registry
-    )
-    metrics['host_avgqu_sz'] = Gauge(
-        'xen_host_avgqu_sz',
-        'Average I/O queue size',
-        ['host', 'host_uuid', 'sr', 'sr_uuid'],
-        registry=registry
-    )
-    metrics['host_inflight'] = Gauge(
-        'xen_host_inflight',
-        'Number of in-flight I/O operations',
-        ['host', 'host_uuid', 'sr', 'sr_uuid'],
-        registry=registry
-    )
-    metrics['host_iowait'] = Gauge(
-        'xen_host_iowait',
-        'I/O wait time ratio',
-        ['host', 'host_uuid', 'sr', 'sr_uuid'],
-        registry=registry
-    )
+    'host_read': ('xen_host_read', 'Disk read operations per second', ['host', 'host_uuid', 'sr', 'sr_uuid']),
+    'host_write': ('xen_host_write', 'Disk write operations per second', ['host', 'host_uuid', 'sr', 'sr_uuid']),
+    'host_read_latency': ('xen_host_read_latency', 'Disk read latency in seconds', ['host', 'host_uuid', 'sr', 'sr_uuid']),
+    'host_write_latency': ('xen_host_write_latency', 'Disk write latency in seconds', ['host', 'host_uuid', 'sr', 'sr_uuid']),
+    'host_latency': ('xen_host_latency', 'Overall disk latency in seconds', ['host', 'host_uuid', 'sr', 'sr_uuid']),
+    'host_iops_read': ('xen_host_iops_read', 'Disk read IOPS', ['host', 'host_uuid', 'sr', 'sr_uuid']),
+    'host_iops_write': ('xen_host_iops_write', 'Disk write IOPS', ['host', 'host_uuid', 'sr', 'sr_uuid']),
+    'host_iops_total': ('xen_host_iops_total', 'Total disk IOPS', ['host', 'host_uuid', 'sr', 'sr_uuid']),
+    'host_io_throughput_read': ('xen_host_io_throughput_read', 'Disk read throughput in bytes/sec', ['host', 'host_uuid', 'sr', 'sr_uuid']),
+    'host_io_throughput_write': ('xen_host_io_throughput_write', 'Disk write throughput in bytes/sec', ['host', 'host_uuid', 'sr', 'sr_uuid']),
+    'host_io_throughput_total': ('xen_host_io_throughput_total', 'Total disk I/O throughput in bytes/sec', ['host', 'host_uuid', 'sr', 'sr_uuid']),
+    'host_avgqu_sz': ('xen_host_avgqu_sz', 'Average I/O queue size', ['host', 'host_uuid', 'sr', 'sr_uuid']),
+    'host_inflight': ('xen_host_inflight', 'Number of in-flight I/O operations', ['host', 'host_uuid', 'sr', 'sr_uuid']),
+    'host_iowait': ('xen_host_iowait', 'I/O wait time ratio', ['host', 'host_uuid', 'sr', 'sr_uuid']),
 
-    # -------------------------------------------------------------------------
     # Host Network Metrics
-    # -------------------------------------------------------------------------
-    metrics['host_pif_rx'] = Gauge(
-        'xen_host_pif_rx',
-        'Physical interface received bytes per second',
-        ['host', 'host_uuid', 'pif'],
-        registry=registry
-    )
-    metrics['host_pif_tx'] = Gauge(
-        'xen_host_pif_tx',
-        'Physical interface transmitted bytes per second',
-        ['host', 'host_uuid', 'pif'],
-        registry=registry
-    )
+    'host_pif_rx': ('xen_host_pif_rx', 'Physical interface received bytes per second', ['host', 'host_uuid', 'pif']),
+    'host_pif_tx': ('xen_host_pif_tx', 'Physical interface transmitted bytes per second', ['host', 'host_uuid', 'pif']),
 
-    # -------------------------------------------------------------------------
     # Host SR Cache Metrics
-    # Note: Using Gauge instead of Counter because RRD provides absolute values
-    # -------------------------------------------------------------------------
-    metrics['host_sr_cache_hits'] = Gauge(
-        'xen_host_sr_cache_hits',
-        'Storage repository cache hits (cumulative)',
-        ['host', 'host_uuid', 'sr', 'sr_uuid'],
-        registry=registry
-    )
-    metrics['host_sr_cache_misses'] = Gauge(
-        'xen_host_sr_cache_misses',
-        'Storage repository cache misses',
-        ['host', 'host_uuid', 'sr', 'sr_uuid'],
-        registry=registry
-    )
-    metrics['host_sr_cache_size'] = Gauge(
-        'xen_host_sr_cache_size',
-        'Storage repository cache size in bytes',
-        ['host', 'host_uuid', 'sr', 'sr_uuid'],
-        registry=registry
-    )
+    'host_sr_cache_hits': ('xen_host_sr_cache_hits', 'Storage repository cache hits (cumulative)', ['host', 'host_uuid', 'sr', 'sr_uuid']),
+    'host_sr_cache_misses': ('xen_host_sr_cache_misses', 'Storage repository cache misses', ['host', 'host_uuid', 'sr', 'sr_uuid']),
+    'host_sr_cache_size': ('xen_host_sr_cache_size', 'Storage repository cache size in bytes', ['host', 'host_uuid', 'sr', 'sr_uuid']),
 
-    # -------------------------------------------------------------------------
     # Host XAPI Metrics
-    # -------------------------------------------------------------------------
-    metrics['host_xapi_allocation_kib'] = Gauge(
-        'xen_host_xapi_allocation_kib',
-        'XAPI memory allocation in KiB',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_xapi_free_memory_kib'] = Gauge(
-        'xen_host_xapi_free_memory_kib',
-        'XAPI free memory in KiB',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_xapi_live_memory_kib'] = Gauge(
-        'xen_host_xapi_live_memory_kib',
-        'XAPI live memory in KiB',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_xapi_memory_usage_kib'] = Gauge(
-        'xen_host_xapi_memory_usage_kib',
-        'XAPI memory usage in KiB',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_xapi_open_fds'] = Gauge(
-        'xen_host_xapi_open_fds',
-        'Number of open file descriptors in XAPI',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
+    'host_xapi_allocation_kib': ('xen_host_xapi_allocation_kib', 'XAPI memory allocation in KiB', ['host', 'host_uuid']),
+    'host_xapi_free_memory_kib': ('xen_host_xapi_free_memory_kib', 'XAPI free memory in KiB', ['host', 'host_uuid']),
+    'host_xapi_live_memory_kib': ('xen_host_xapi_live_memory_kib', 'XAPI live memory in KiB', ['host', 'host_uuid']),
+    'host_xapi_memory_usage_kib': ('xen_host_xapi_memory_usage_kib', 'XAPI memory usage in KiB', ['host', 'host_uuid']),
+    'host_xapi_open_fds': ('xen_host_xapi_open_fds', 'Number of open file descriptors in XAPI', ['host', 'host_uuid']),
 
-    # -------------------------------------------------------------------------
     # Host Pool Metrics
-    # -------------------------------------------------------------------------
-    metrics['host_pool_session_count'] = Gauge(
-        'xen_host_pool_session_count',
-        'Number of active pool sessions',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_pool_task_count'] = Gauge(
-        'xen_host_pool_task_count',
-        'Number of active pool tasks',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_pool_session_creation_rate'] = Gauge(
-        'xen_host_pool_session_creation_rate',
-        'Rate of pool session creation',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
+    'host_pool_session_count': ('xen_host_pool_session_count', 'Number of active pool sessions', ['host', 'host_uuid']),
+    'host_pool_task_count': ('xen_host_pool_task_count', 'Number of active pool tasks', ['host', 'host_uuid']),
+    'host_pool_session_creation_rate': ('xen_host_pool_session_creation_rate', 'Rate of pool session creation', ['host', 'host_uuid']),
 
-    # -------------------------------------------------------------------------
     # Other Host Metrics
-    # -------------------------------------------------------------------------
-    metrics['host_loadavg'] = Gauge(
-        'xen_host_loadavg',
-        'System load average',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_hostload'] = Gauge(
-        'xen_host_hostload',
-        'Host load',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_running_domains'] = Gauge(
-        'xen_host_running_domains',
-        'Number of running domains (VMs)',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_running_vcpus'] = Gauge(
-        'xen_host_running_vcpus',
-        'Number of running vCPUs',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_dcmi_power_reading'] = Gauge(
-        'xen_host_dcmi_power_reading',
-        'DCMI power reading in watts',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_tapdisks_in_low_memory_mode'] = Gauge(
-        'xen_host_tapdisks_in_low_memory_mode',
-        'Number of tapdisks in low memory mode',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_multipath_enabled'] = Gauge(
-        'xen_host_multipath_enabled',
-        'Whether multipath is enabled on the host (1=enabled, 0=disabled)',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
+    'host_loadavg': ('xen_host_loadavg', 'System load average', ['host', 'host_uuid']),
+    'host_hostload': ('xen_host_hostload', 'Host load', ['host', 'host_uuid']),
+    'host_running_domains': ('xen_host_running_domains', 'Number of running domains (VMs)', ['host', 'host_uuid']),
+    'host_running_vcpus': ('xen_host_running_vcpus', 'Number of running vCPUs', ['host', 'host_uuid']),
+    'host_dcmi_power_reading': ('xen_host_dcmi_power_reading', 'DCMI power reading in watts', ['host', 'host_uuid']),
+    'host_tapdisks_in_low_memory_mode': ('xen_host_tapdisks_in_low_memory_mode', 'Number of tapdisks in low memory mode', ['host', 'host_uuid']),
+    'host_multipath_enabled': ('xen_host_multipath_enabled', 'Whether multipath is enabled on the host (1=enabled, 0=disabled)', ['host', 'host_uuid']),
 
-    # -------------------------------------------------------------------------
     # Host Xenopsd Metrics
-    # -------------------------------------------------------------------------
-    metrics['host_xenopsd_xc_fdsize'] = Gauge(
-        'xen_host_xenopsd_xc_fdsize',
-        'Xenopsd XC file descriptor size',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_xenopsd_xc_mem_extra'] = Gauge(
-        'xen_host_xenopsd_xc_mem_extra',
-        'Xenopsd XC extra memory',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_xenopsd_xc_ocaml_allocation_rate'] = Gauge(
-        'xen_host_xenopsd_xc_ocaml_allocation_rate',
-        'Xenopsd XC OCaml allocation rate',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_xenopsd_xc_ocaml_free'] = Gauge(
-        'xen_host_xenopsd_xc_ocaml_free',
-        'Xenopsd XC OCaml free memory',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_xenopsd_xc_ocaml_maybe_live'] = Gauge(
-        'xen_host_xenopsd_xc_ocaml_maybe_live',
-        'Xenopsd XC OCaml maybe live memory',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_xenopsd_xc_ocaml_total'] = Gauge(
-        'xen_host_xenopsd_xc_ocaml_total',
-        'Xenopsd XC OCaml total memory',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_xenopsd_xc_rss'] = Gauge(
-        'xen_host_xenopsd_xc_rss',
-        'Xenopsd XC resident set size',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_xenopsd_xc_threads'] = Gauge(
-        'xen_host_xenopsd_xc_threads',
-        'Xenopsd XC number of threads',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_xenopsd_xc_vmdata'] = Gauge(
-        'xen_host_xenopsd_xc_vmdata',
-        'Xenopsd XC VM data size',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_xenopsd_xc_vmlck'] = Gauge(
-        'xen_host_xenopsd_xc_vmlck',
-        'Xenopsd XC VM locked memory',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_xenopsd_xc_vmpin'] = Gauge(
-        'xen_host_xenopsd_xc_vmpin',
-        'Xenopsd XC VM pinned memory',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_xenopsd_xc_vmpte'] = Gauge(
-        'xen_host_xenopsd_xc_vmpte',
-        'Xenopsd XC VM page table entries',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_xenopsd_xc_vmsize'] = Gauge(
-        'xen_host_xenopsd_xc_vmsize',
-        'Xenopsd XC VM size',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['host_xenopsd_xc_vmstk'] = Gauge(
-        'xen_host_xenopsd_xc_vmstk',
-        'Xenopsd XC VM stack size',
-        ['host', 'host_uuid'],
-        registry=registry
-    )
+    'host_xenopsd_xc_fdsize': ('xen_host_xenopsd_xc_fdsize', 'Xenopsd XC file descriptor size', ['host', 'host_uuid']),
+    'host_xenopsd_xc_mem_extra': ('xen_host_xenopsd_xc_mem_extra', 'Xenopsd XC extra memory', ['host', 'host_uuid']),
+    'host_xenopsd_xc_ocaml_allocation_rate': ('xen_host_xenopsd_xc_ocaml_allocation_rate', 'Xenopsd XC OCaml allocation rate', ['host', 'host_uuid']),
+    'host_xenopsd_xc_ocaml_free': ('xen_host_xenopsd_xc_ocaml_free', 'Xenopsd XC OCaml free memory', ['host', 'host_uuid']),
+    'host_xenopsd_xc_ocaml_maybe_live': ('xen_host_xenopsd_xc_ocaml_maybe_live', 'Xenopsd XC OCaml maybe live memory', ['host', 'host_uuid']),
+    'host_xenopsd_xc_ocaml_total': ('xen_host_xenopsd_xc_ocaml_total', 'Xenopsd XC OCaml total memory', ['host', 'host_uuid']),
+    'host_xenopsd_xc_rss': ('xen_host_xenopsd_xc_rss', 'Xenopsd XC resident set size', ['host', 'host_uuid']),
+    'host_xenopsd_xc_threads': ('xen_host_xenopsd_xc_threads', 'Xenopsd XC number of threads', ['host', 'host_uuid']),
+    'host_xenopsd_xc_vmdata': ('xen_host_xenopsd_xc_vmdata', 'Xenopsd XC VM data size', ['host', 'host_uuid']),
+    'host_xenopsd_xc_vmlck': ('xen_host_xenopsd_xc_vmlck', 'Xenopsd XC VM locked memory', ['host', 'host_uuid']),
+    'host_xenopsd_xc_vmpin': ('xen_host_xenopsd_xc_vmpin', 'Xenopsd XC VM pinned memory', ['host', 'host_uuid']),
+    'host_xenopsd_xc_vmpte': ('xen_host_xenopsd_xc_vmpte', 'Xenopsd XC VM page table entries', ['host', 'host_uuid']),
+    'host_xenopsd_xc_vmsize': ('xen_host_xenopsd_xc_vmsize', 'Xenopsd XC VM size', ['host', 'host_uuid']),
+    'host_xenopsd_xc_vmstk': ('xen_host_xenopsd_xc_vmstk', 'Xenopsd XC VM stack size', ['host', 'host_uuid']),
 
-    # -------------------------------------------------------------------------
     # VM CPU Metrics
-    # -------------------------------------------------------------------------
-    metrics['vm_cpu'] = Gauge(
-        'xen_vm_cpu',
-        'VM CPU utilization per vCPU (0-1 ratio)',
-        ['vm', 'vm_uuid', 'host', 'host_uuid', 'cpu'],
-        registry=registry
-    )
-    metrics['vm_cpu_usage'] = Gauge(
-        'xen_vm_cpu_usage',
-        'VM total CPU usage',
-        ['vm', 'vm_uuid', 'host', 'host_uuid'],
-        registry=registry
-    )
+    'vm_cpu': ('xen_vm_cpu', 'VM CPU utilization per vCPU (0-1 ratio)', ['vm', 'vm_uuid', 'host', 'host_uuid', 'cpu']),
+    'vm_cpu_usage': ('xen_vm_cpu_usage', 'VM total CPU usage', ['vm', 'vm_uuid', 'host', 'host_uuid']),
 
-    # -------------------------------------------------------------------------
     # VM Memory Metrics
-    # -------------------------------------------------------------------------
-    metrics['vm_memory'] = Gauge(
-        'xen_vm_memory',
-        'VM memory usage in bytes',
-        ['vm', 'vm_uuid', 'host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['vm_memory_internal_free'] = Gauge(
-        'xen_vm_memory_internal_free',
-        'VM internal free memory (guest-reported) in bytes',
-        ['vm', 'vm_uuid', 'host', 'host_uuid'],
-        registry=registry
-    )
-    metrics['vm_memory_target'] = Gauge(
-        'xen_vm_memory_target',
-        'VM memory target in bytes',
-        ['vm', 'vm_uuid', 'host', 'host_uuid'],
-        registry=registry
-    )
+    'vm_memory': ('xen_vm_memory', 'VM memory usage in bytes', ['vm', 'vm_uuid', 'host', 'host_uuid']),
+    'vm_memory_internal_free': ('xen_vm_memory_internal_free', 'VM internal free memory (guest-reported) in bytes', ['vm', 'vm_uuid', 'host', 'host_uuid']),
+    'vm_memory_target': ('xen_vm_memory_target', 'VM memory target in bytes', ['vm', 'vm_uuid', 'host', 'host_uuid']),
 
-    # -------------------------------------------------------------------------
-    # VM VBD (Virtual Block Device) Metrics
-    # -------------------------------------------------------------------------
-    metrics['vm_vbd_read'] = Gauge(
-        'xen_vm_vbd_read',
-        'VBD read operations per second',
-        ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd'],
-        registry=registry
-    )
-    metrics['vm_vbd_write'] = Gauge(
-        'xen_vm_vbd_write',
-        'VBD write operations per second',
-        ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd'],
-        registry=registry
-    )
-    metrics['vm_vbd_read_latency'] = Gauge(
-        'xen_vm_vbd_read_latency',
-        'VBD read latency in seconds',
-        ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd'],
-        registry=registry
-    )
-    metrics['vm_vbd_write_latency'] = Gauge(
-        'xen_vm_vbd_write_latency',
-        'VBD write latency in seconds',
-        ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd'],
-        registry=registry
-    )
-    metrics['vm_vbd_latency'] = Gauge(
-        'xen_vm_vbd_latency',
-        'VBD overall latency in seconds',
-        ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd'],
-        registry=registry
-    )
-    metrics['vm_vbd_iops_read'] = Gauge(
-        'xen_vm_vbd_iops_read',
-        'VBD read IOPS',
-        ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd'],
-        registry=registry
-    )
-    metrics['vm_vbd_iops_write'] = Gauge(
-        'xen_vm_vbd_iops_write',
-        'VBD write IOPS',
-        ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd'],
-        registry=registry
-    )
-    metrics['vm_vbd_iops_total'] = Gauge(
-        'xen_vm_vbd_iops_total',
-        'VBD total IOPS',
-        ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd'],
-        registry=registry
-    )
-    metrics['vm_vbd_io_throughput_read'] = Gauge(
-        'xen_vm_vbd_io_throughput_read',
-        'VBD read throughput in bytes/sec',
-        ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd'],
-        registry=registry
-    )
-    metrics['vm_vbd_io_throughput_write'] = Gauge(
-        'xen_vm_vbd_io_throughput_write',
-        'VBD write throughput in bytes/sec',
-        ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd'],
-        registry=registry
-    )
-    metrics['vm_vbd_io_throughput_total'] = Gauge(
-        'xen_vm_vbd_io_throughput_total',
-        'VBD total I/O throughput in bytes/sec',
-        ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd'],
-        registry=registry
-    )
-    metrics['vm_vbd_avgqu_sz'] = Gauge(
-        'xen_vm_vbd_avgqu_sz',
-        'VBD average I/O queue size',
-        ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd'],
-        registry=registry
-    )
-    metrics['vm_vbd_inflight'] = Gauge(
-        'xen_vm_vbd_inflight',
-        'VBD number of in-flight operations',
-        ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd'],
-        registry=registry
-    )
-    metrics['vm_vbd_iowait'] = Gauge(
-        'xen_vm_vbd_iowait',
-        'VBD I/O wait time ratio',
-        ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd'],
-        registry=registry
-    )
+    # VM VBD Metrics
+    'vm_vbd_read': ('xen_vm_vbd_read', 'VBD read operations per second', ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd']),
+    'vm_vbd_write': ('xen_vm_vbd_write', 'VBD write operations per second', ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd']),
+    'vm_vbd_read_latency': ('xen_vm_vbd_read_latency', 'VBD read latency in seconds', ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd']),
+    'vm_vbd_write_latency': ('xen_vm_vbd_write_latency', 'VBD write latency in seconds', ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd']),
+    'vm_vbd_latency': ('xen_vm_vbd_latency', 'VBD overall latency in seconds', ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd']),
+    'vm_vbd_iops_read': ('xen_vm_vbd_iops_read', 'VBD read IOPS', ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd']),
+    'vm_vbd_iops_write': ('xen_vm_vbd_iops_write', 'VBD write IOPS', ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd']),
+    'vm_vbd_iops_total': ('xen_vm_vbd_iops_total', 'VBD total IOPS', ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd']),
+    'vm_vbd_io_throughput_read': ('xen_vm_vbd_io_throughput_read', 'VBD read throughput in bytes/sec', ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd']),
+    'vm_vbd_io_throughput_write': ('xen_vm_vbd_io_throughput_write', 'VBD write throughput in bytes/sec', ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd']),
+    'vm_vbd_io_throughput_total': ('xen_vm_vbd_io_throughput_total', 'VBD total I/O throughput in bytes/sec', ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd']),
+    'vm_vbd_avgqu_sz': ('xen_vm_vbd_avgqu_sz', 'VBD average I/O queue size', ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd']),
+    'vm_vbd_inflight': ('xen_vm_vbd_inflight', 'VBD number of in-flight operations', ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd']),
+    'vm_vbd_iowait': ('xen_vm_vbd_iowait', 'VBD I/O wait time ratio', ['vm', 'vm_uuid', 'host', 'host_uuid', 'vbd']),
 
-    # -------------------------------------------------------------------------
-    # VM VIF (Virtual Interface) Metrics
-    # -------------------------------------------------------------------------
-    metrics['vm_vif_rx'] = Gauge(
-        'xen_vm_vif_rx',
-        'VIF received bytes per second',
-        ['vm', 'vm_uuid', 'host', 'host_uuid', 'vif'],
-        registry=registry
-    )
-    metrics['vm_vif_tx'] = Gauge(
-        'xen_vm_vif_tx',
-        'VIF transmitted bytes per second',
-        ['vm', 'vm_uuid', 'host', 'host_uuid', 'vif'],
-        registry=registry
-    )
+    # VM VIF Metrics
+    'vm_vif_rx': ('xen_vm_vif_rx', 'VIF received bytes per second', ['vm', 'vm_uuid', 'host', 'host_uuid', 'vif']),
+    'vm_vif_tx': ('xen_vm_vif_tx', 'VIF transmitted bytes per second', ['vm', 'vm_uuid', 'host', 'host_uuid', 'vif']),
 
-    # -------------------------------------------------------------------------
     # Storage Repository Metrics
-    # -------------------------------------------------------------------------
-    metrics['sr_physical_size'] = Gauge(
-        'xen_sr_physical_size',
-        'Total physical size of storage repository in bytes',
-        ['sr', 'sr_uuid', 'type', 'content_type'],
-        registry=registry
-    )
-    metrics['sr_physical_utilization'] = Gauge(
-        'xen_sr_physical_utilization',
-        'Used physical space on storage repository in bytes',
-        ['sr', 'sr_uuid', 'type', 'content_type'],
-        registry=registry
-    )
-    metrics['sr_virtual_allocation'] = Gauge(
-        'xen_sr_virtual_allocation',
-        'Virtual allocation on storage repository in bytes',
-        ['sr', 'sr_uuid', 'type', 'content_type'],
-        registry=registry
-    )
-    metrics['sr_multipath_active'] = Gauge(
-        'xen_sr_multipath_active',
-        'Whether multipath is active for the storage repository (1=active, 0=inactive)',
-        ['sr', 'sr_uuid'],
-        registry=registry
-    )
+    'sr_physical_size': ('xen_sr_physical_size', 'Total physical size of storage repository in bytes', ['sr', 'sr_uuid', 'type', 'content_type']),
+    'sr_physical_utilization': ('xen_sr_physical_utilization', 'Used physical space on storage repository in bytes', ['sr', 'sr_uuid', 'type', 'content_type']),
+    'sr_virtual_allocation': ('xen_sr_virtual_allocation', 'Virtual allocation on storage repository in bytes', ['sr', 'sr_uuid', 'type', 'content_type']),
+    'sr_multipath_active': ('xen_sr_multipath_active', 'Whether multipath is active for the storage repository (1=active, 0=inactive)', ['sr', 'sr_uuid']),
 
-    # -------------------------------------------------------------------------
-    # PBD (Physical Block Device) Metrics
-    # -------------------------------------------------------------------------
-    metrics['pbd_attached'] = Gauge(
-        'xen_pbd_attached',
-        'PBD connection status (1=attached, 0=detached)',
-        ['sr', 'sr_uuid', 'host', 'host_uuid', 'type'],
-        registry=registry
-    )
+    # PBD Metrics
+    'pbd_attached': ('xen_pbd_attached', 'PBD connection status (1=attached, 0=detached)', ['sr', 'sr_uuid', 'host', 'host_uuid', 'type']),
 
-    # -------------------------------------------------------------------------
     # Collector Metrics
-    # -------------------------------------------------------------------------
-    metrics['collector_duration_seconds'] = Gauge(
-        'xen_collector_duration_seconds',
-        'Time taken to collect all metrics in seconds',
-        [],
-        registry=registry
-    )
+    'collector_duration_seconds': ('xen_collector_duration_seconds', 'Time taken to collect all metrics in seconds', []),
+}
 
-    return registry, metrics
+
+class XenCollector:
+    """
+    Prometheus Collector for XenServer/XCP-ng metrics.
+
+    This collector implements the official prometheus_client Collector pattern,
+    which is the recommended way to build exporters that fetch metrics from
+    external sources on each scrape.
+    """
+
+    def __init__(self):
+        """Initialize the collector with configuration from environment variables."""
+        self.xen_user = os.getenv("XEN_USER", "root")
+        self.xen_password = os.getenv("XEN_PASSWORD", "")
+        self.xen_host = os.getenv("XEN_HOST", "localhost")
+        self.xen_mode = os.getenv("XEN_MODE", "host")
+        self.xen_credentials = os.getenv("XEN_CREDENTIALS")
+        self.verify_ssl = parse_bool_env("XEN_SSL_VERIFY", default=True)
+        self.halt_on_no_uuid = parse_bool_env("HALT_ON_NO_UUID", default=False)
+        self.collect_pbd = parse_bool_env("XEN_COLLECT_PBD", default=True)
+        self.collect_multipath = parse_bool_env("XEN_COLLECT_MULTIPATH", default=True)
+
+        # Parse per-host credentials
+        self.host_credentials = parse_credentials(
+            self.xen_credentials, self.xen_user, self.xen_password
+        )
+
+    def collect(self):
+        """
+        Collect metrics from XenServer/XCP-ng.
+
+        This method is called by prometheus_client on each scrape request.
+        It yields GaugeMetricFamily objects for each metric.
+        """
+        # Cleanup caches if they've grown too large
+        _cleanup_cache_if_needed()
+
+        # Track collected metrics: metric_key -> {labels_tuple: value}
+        collected_metrics = {}
+        # Track dynamic metrics discovered during collection
+        dynamic_metrics = {}
+
+        collector_start_time = time.perf_counter()
+
+        try:
+            # Get credentials for poolmaster
+            poolmaster_user, poolmaster_pass = get_host_credentials(
+                self.xen_host, self.host_credentials, self.xen_user, self.xen_password
+            )
+
+            xen_poolmaster = collect_poolmaster(
+                xen_user=poolmaster_user,
+                xen_password=poolmaster_pass,
+                xen_host=self.xen_host,
+                verify_ssl=self.verify_ssl,
+            )
+
+            # Get credentials for the actual poolmaster address
+            poolmaster_user, poolmaster_pass = get_host_credentials(
+                xen_poolmaster, self.host_credentials, self.xen_user, self.xen_password
+            )
+
+            with Xen("https://" + xen_poolmaster, poolmaster_user, poolmaster_pass, self.verify_ssl) as xen:
+                if self.xen_mode == "host":
+                    xen_hosts = [self.xen_host]
+                else:
+                    xen_hosts = get_all_hosts_in_pool(xen)
+
+                for current_host in xen_hosts:
+                    self._collect_host_metrics(
+                        xen, current_host, collected_metrics, dynamic_metrics
+                    )
+
+                # Collect SR usage metrics
+                self._collect_sr_usage(xen, collected_metrics)
+
+                # Collect PBD status metrics if enabled
+                if self.collect_pbd:
+                    self._collect_pbd_status(xen, collected_metrics)
+
+                # Collect multipath status metrics if enabled
+                if self.collect_multipath:
+                    self._collect_multipath_status(xen, collected_metrics)
+
+        except Exception as e:
+            logging.error("Error during metric collection: %s", e)
+            # Continue to yield whatever metrics we collected
+
+        # Record collection duration
+        collector_end_time = time.perf_counter()
+        duration = collector_end_time - collector_start_time
+        collected_metrics['collector_duration_seconds'] = {(): duration}
+
+        # Yield all collected metrics as GaugeMetricFamily objects
+        yield from self._yield_metrics(collected_metrics, dynamic_metrics)
+
+    def _collect_host_metrics(self, xen, current_host, collected_metrics, dynamic_metrics):
+        """Collect RRD metrics from a single host."""
+        host_name = None
+        host_uuid = None
+
+        url = f"https://{current_host}/rrd_updates?start={int(time.time()-DEFAULT_METRICS_WINDOW_SECONDS)}&json=true&host=true&cf=AVERAGE"
+
+        # Get credentials for this specific host
+        current_user, current_pass = get_host_credentials(
+            current_host, self.host_credentials, self.xen_user, self.xen_password
+        )
+
+        req = urllib.request.Request(url)
+        req.add_header(
+            "Authorization",
+            "Basic " + base64.b64encode(
+                (current_user + ":" + current_pass).encode("utf-8")
+            ).decode("utf-8"),
+        )
+        res = urllib.request.urlopen(
+            req,
+            context=None if self.verify_ssl else ssl._create_unverified_context(),
+            timeout=HTTP_TIMEOUT_SECONDS
+        )
+        rrd_metrics = pyjson5.decode_io(res)
+
+        # First pass: find host name and UUID
+        for metric_name in rrd_metrics["meta"]["legend"]:
+            metric_legend = metric_name.split(":")[1:]
+            if len(metric_legend) < 3:
+                logging.warning("Invalid metric legend format (expected 3+ parts): %s", metric_name)
+                continue
+            collector_type = metric_legend[0]
+            collector = metric_legend[1]
+
+            if collector_type == 'host':
+                host_name = get_or_set(hosts, collector, lookup_host_name, xen)
+                host_uuid = collector
+                break
+
+        if host_name is None or host_uuid is None:
+            raise RuntimeError("Hostname or UUID not found in any retrieved data")
+
+        # Second pass: collect all metrics
+        for metric_idx, metric_name in enumerate(rrd_metrics["meta"]["legend"]):
+            metric_legend = metric_name.split(":")[1:]
+            if len(metric_legend) < 3:
+                continue
+            collector_type = metric_legend[0]
+            collector = metric_legend[1]
+            metric_type = metric_legend[2]
+            extra_tags = {}
+
+            if collector_type == "vm":
+                vm = get_or_set(vms, collector, lookup_vm_name, xen)
+                extra_tags["vm"] = vm
+                extra_tags["vm_uuid"] = collector
+                extra_tags['host'] = host_name
+                extra_tags['host_uuid'] = host_uuid
+            elif collector_type == 'host':
+                extra_tags['host'] = host_name
+                extra_tags['host_uuid'] = host_uuid
+
+            if collector_type == "host" and "sr_" in metric_type:
+                sr_parts = metric_type.split("sr_", 1)
+                if len(sr_parts) > 1 and sr_parts[1]:
+                    x = sr_parts[1]
+                    x_parts = x.split("_")
+                    sr = get_or_set(srs, x_parts[0], lookup_sr_name_by_uuid, xen)
+                    extra_tags["sr"] = sr
+                    extra_tags["sr_uuid"] = x_parts[0]
+                    metric_type = "sr_" + "_".join(x_parts[1:])
+
+            # Handle SR metrics which don't have a full UUID
+            if (
+                collector_type == "host"
+                and len(metric_type.split("_")[-1]) == SHORT_SR_UUID_LENGTH
+                and "_".join(metric_type.split("_")[0:-1]) in sr_metrics
+            ):
+                short_sr = metric_type.split("_")[-1]
+                long_sr = find_full_sr_uuid(short_sr, xen, self.halt_on_no_uuid)
+                if long_sr is not None:
+                    sr = get_or_set(srs, long_sr, lookup_sr_name_by_uuid, xen)
+                    extra_tags["sr"] = sr
+                    extra_tags["sr_uuid"] = long_sr
+                metric_type = "_".join(metric_type.split("_")[0:-1])
+
+            if collector_type == "vm" and "vbd_" in metric_type:
+                vbd_parts = metric_type.split("vbd_", 1)
+                if len(vbd_parts) > 1 and vbd_parts[1]:
+                    x_parts = vbd_parts[1].split("_")
+                    extra_tags["vbd"] = x_parts[0]
+                    metric_type = "vbd_" + "_".join(x_parts[1:])
+
+            if collector_type == "vm" and "vif_" in metric_type:
+                vif_parts = metric_type.split("vif_", 1)
+                if len(vif_parts) > 1 and vif_parts[1]:
+                    x_parts = vif_parts[1].split("_")
+                    extra_tags["vif"] = x_parts[0]
+                    metric_type = "vif_" + "_".join(x_parts[1:])
+
+            if collector_type == "host" and "pif_" in metric_type:
+                pif_parts = metric_type.split("pif_", 1)
+                if len(pif_parts) > 1 and pif_parts[1]:
+                    x_parts = pif_parts[1].split("_")
+                    extra_tags["pif"] = x_parts[0]
+                    metric_type = "pif_" + "_".join(x_parts[1:])
+
+            if "cpu" in metric_type:
+                cpu_parts = metric_type.split("cpu", 1)
+                if len(cpu_parts) > 1 and cpu_parts[1]:
+                    x = cpu_parts[1]
+                    if x.isnumeric():
+                        extra_tags["cpu"] = x
+                        metric_type = "cpu"
+                    elif "-" in x:
+                        x_parts = x.split("-", 1)
+                        extra_tags["cpu"] = x_parts[0]
+                        metric_type = "cpu_" + x_parts[1] if len(x_parts) > 1 else "cpu"
+            if "CPU" in metric_type:
+                cpu_parts = metric_type.split("CPU", 1)
+                if len(cpu_parts) > 1 and cpu_parts[1]:
+                    x = cpu_parts[1]
+                    x_parts = x.split("-")
+                    extra_tags["cpu"] = x_parts[0]
+                    metric_type = "cpu_" + "_".join(x_parts[1:]) if len(x_parts) > 1 else "cpu"
+
+            # Normalize metric names
+            metric_type = metric_type.lower().replace("-", "_")
+            metric_key = f"{collector_type}_{metric_type}"
+            value = rrd_metrics['data'][0]['values'][metric_idx]
+
+            # Store metric value
+            self._store_metric(
+                collected_metrics, dynamic_metrics, metric_key, extra_tags, float(value)
+            )
+
+    def _store_metric(self, collected_metrics, dynamic_metrics, metric_key, labels, value):
+        """Store a metric value for later yielding."""
+        # Determine label names for this metric
+        if metric_key in METRIC_DEFINITIONS:
+            label_names = METRIC_DEFINITIONS[metric_key][2]
+        else:
+            # Dynamic metric - record its label names
+            label_names = list(labels.keys())
+            if metric_key not in dynamic_metrics:
+                dynamic_metrics[metric_key] = label_names
+                logging.debug("Discovered dynamic metric: %s with labels %s", metric_key, label_names)
+
+        # Create labels tuple in correct order
+        labels_tuple = tuple(labels.get(ln, '') for ln in label_names)
+
+        # Initialize metric dict if needed
+        if metric_key not in collected_metrics:
+            collected_metrics[metric_key] = {}
+
+        collected_metrics[metric_key][labels_tuple] = value
+
+    def _collect_sr_usage(self, session, collected_metrics):
+        """Collect storage repository usage metrics."""
+        sr_records = session.xenapi.SR.get_all_records()
+        for sr_record in sr_records.values():
+            sr_name_label = sr_record["name_label"]
+            sr_uuid = sr_record["uuid"]
+            sr_type = sr_record["type"]
+            content_type = sr_record["content_type"]
+
+            labels = {
+                'sr': sr_name_label,
+                'sr_uuid': sr_uuid,
+                'type': sr_type,
+                'content_type': content_type
+            }
+
+            if "physical_size" in sr_record:
+                self._store_metric(
+                    collected_metrics, {}, 'sr_physical_size',
+                    labels, float(sr_record["physical_size"])
+                )
+
+            if "physical_utilisation" in sr_record:
+                self._store_metric(
+                    collected_metrics, {}, 'sr_physical_utilization',
+                    labels, float(sr_record["physical_utilisation"])
+                )
+
+            if "virtual_allocation" in sr_record:
+                self._store_metric(
+                    collected_metrics, {}, 'sr_virtual_allocation',
+                    labels, float(sr_record["virtual_allocation"])
+                )
+
+    def _collect_pbd_status(self, session, collected_metrics):
+        """Collect PBD attachment status metrics."""
+        try:
+            pbd_records = session.xenapi.PBD.get_all_records()
+            sr_cache = {}
+            host_cache = {}
+
+            for pbd_ref, pbd_record in pbd_records.items():
+                try:
+                    sr_ref = pbd_record.get("SR")
+                    host_ref = pbd_record.get("host")
+
+                    if not sr_ref or not host_ref:
+                        continue
+
+                    if sr_ref not in sr_cache:
+                        sr_cache[sr_ref] = session.xenapi.SR.get_record(sr_ref)
+                    sr_record = sr_cache[sr_ref]
+
+                    if host_ref not in host_cache:
+                        host_cache[host_ref] = session.xenapi.host.get_record(host_ref)
+                    host_record = host_cache[host_ref]
+
+                    sr_name = sr_record.get("name_label", "unknown")
+                    sr_uuid = sr_record.get("uuid", "unknown")
+                    sr_type = sr_record.get("type", "unknown")
+                    host_name = host_record.get("name_label", "unknown")
+                    host_uuid = host_record.get("uuid", "unknown")
+
+                    attached = 1 if pbd_record.get("currently_attached", False) else 0
+
+                    labels = {
+                        'sr': sr_name,
+                        'sr_uuid': sr_uuid,
+                        'host': host_name,
+                        'host_uuid': host_uuid,
+                        'type': sr_type
+                    }
+                    self._store_metric(collected_metrics, {}, 'pbd_attached', labels, attached)
+
+                except Exception as e:
+                    logging.warning("Error processing PBD record: %s", e)
+                    continue
+
+        except Exception as e:
+            logging.error("Failed to collect PBD status: %s", e)
+
+    def _collect_multipath_status(self, session, collected_metrics):
+        """Collect multipath status metrics for hosts and SRs."""
+        try:
+            # Host-level multipath status
+            host_records = session.xenapi.host.get_all_records()
+            for host_ref, host_record in host_records.items():
+                try:
+                    host_name = host_record.get("name_label", "unknown")
+                    host_uuid = host_record.get("uuid", "unknown")
+
+                    other_config = host_record.get("other_config", {})
+                    multipath_enabled = other_config.get("multipathing", "false")
+                    enabled_val = 1 if str(multipath_enabled).lower() == "true" else 0
+
+                    labels = {'host': host_name, 'host_uuid': host_uuid}
+                    self._store_metric(
+                        collected_metrics, {}, 'host_multipath_enabled', labels, enabled_val
+                    )
+
+                except Exception as e:
+                    logging.warning("Error processing host multipath record: %s", e)
+                    continue
+
+            # SR-level multipath status via PBDs
+            pbd_records = session.xenapi.PBD.get_all_records()
+            sr_cache = {}
+            sr_multipath_seen = set()
+
+            for pbd_ref, pbd_record in pbd_records.items():
+                try:
+                    sr_ref = pbd_record.get("SR")
+                    if not sr_ref:
+                        continue
+
+                    if sr_ref not in sr_cache:
+                        sr_cache[sr_ref] = session.xenapi.SR.get_record(sr_ref)
+                    sr_record = sr_cache[sr_ref]
+
+                    sr_name = sr_record.get("name_label", "unknown")
+                    sr_uuid = sr_record.get("uuid", "unknown")
+
+                    if sr_uuid in sr_multipath_seen:
+                        continue
+                    sr_multipath_seen.add(sr_uuid)
+
+                    device_config = pbd_record.get("device_config", {})
+                    multipath_val = device_config.get("multipath", "false")
+                    multipath_active = 1 if str(multipath_val).lower() == "true" else 0
+
+                    labels = {'sr': sr_name, 'sr_uuid': sr_uuid}
+                    self._store_metric(
+                        collected_metrics, {}, 'sr_multipath_active', labels, multipath_active
+                    )
+
+                except Exception as e:
+                    logging.warning("Error processing SR multipath record: %s", e)
+                    continue
+
+        except Exception as e:
+            logging.error("Failed to collect multipath status: %s", e)
+
+    def _yield_metrics(self, collected_metrics, dynamic_metrics):
+        """Yield GaugeMetricFamily objects for all collected metrics."""
+        for metric_key, values in collected_metrics.items():
+            if metric_key in METRIC_DEFINITIONS:
+                prom_name, help_text, label_names = METRIC_DEFINITIONS[metric_key]
+            elif metric_key in dynamic_metrics:
+                prom_name = f"xen_{metric_key}"
+                help_text = f"Dynamic metric: {metric_key}"
+                label_names = dynamic_metrics[metric_key]
+            else:
+                continue
+
+            gauge = GaugeMetricFamily(prom_name, help_text, labels=label_names)
+
+            for labels_tuple, value in values.items():
+                gauge.add_metric(list(labels_tuple), value)
+
+            yield gauge
 
 
 def _cleanup_cache_if_needed():
@@ -770,156 +698,6 @@ def collect_poolmaster(
     return poolmaster
 
 
-def collect_sr_usage(session: XenAPI.Session, metrics: dict):
-    """Collect storage repository usage metrics."""
-    sr_records = session.xenapi.SR.get_all_records()
-    for sr_record in sr_records.values():
-        sr_name_label = sr_record["name_label"]
-        sr_uuid = sr_record["uuid"]
-        sr_type = sr_record["type"]
-        content_type = sr_record["content_type"]
-
-        labels = {
-            'sr': sr_name_label,
-            'sr_uuid': sr_uuid,
-            'type': sr_type,
-            'content_type': content_type
-        }
-
-        if "physical_size" in sr_record:
-            metrics['sr_physical_size'].labels(**labels).set(float(sr_record["physical_size"]))
-
-        if "physical_utilisation" in sr_record:
-            metrics['sr_physical_utilization'].labels(**labels).set(float(sr_record["physical_utilisation"]))
-
-        if "virtual_allocation" in sr_record:
-            metrics['sr_virtual_allocation'].labels(**labels).set(float(sr_record["virtual_allocation"]))
-
-
-def collect_pbd_status(session: XenAPI.Session, metrics: dict):
-    """
-    Collect PBD (Physical Block Device) attachment status metrics.
-    Sets metrics indicating whether each PBD is currently attached (1) or detached (0).
-    """
-    try:
-        pbd_records = session.xenapi.PBD.get_all_records()
-        sr_cache = {}
-        host_cache = {}
-
-        for pbd_ref, pbd_record in pbd_records.items():
-            try:
-                sr_ref = pbd_record.get("SR")
-                host_ref = pbd_record.get("host")
-
-                if not sr_ref or not host_ref:
-                    continue
-
-                # Cache SR record to avoid repeated API calls
-                if sr_ref not in sr_cache:
-                    sr_cache[sr_ref] = session.xenapi.SR.get_record(sr_ref)
-                sr_record = sr_cache[sr_ref]
-
-                # Cache host record to avoid repeated API calls
-                if host_ref not in host_cache:
-                    host_cache[host_ref] = session.xenapi.host.get_record(host_ref)
-                host_record = host_cache[host_ref]
-
-                sr_name = sr_record.get("name_label", "unknown")
-                sr_uuid = sr_record.get("uuid", "unknown")
-                sr_type = sr_record.get("type", "unknown")
-                host_name = host_record.get("name_label", "unknown")
-                host_uuid = host_record.get("uuid", "unknown")
-
-                attached = 1 if pbd_record.get("currently_attached", False) else 0
-
-                metrics['pbd_attached'].labels(
-                    sr=sr_name,
-                    sr_uuid=sr_uuid,
-                    host=host_name,
-                    host_uuid=host_uuid,
-                    type=sr_type
-                ).set(attached)
-
-            except Exception as e:
-                # Skip this PBD if there's an error, continue with others
-                logging.warning("Error processing PBD record: %s", e)
-                continue
-
-    except Exception as e:
-        # If we can't get PBD records at all, log the error
-        # This ensures the exporter continues working even if PBD API fails
-        logging.error("Failed to collect PBD status: %s", e)
-
-
-def collect_multipath_status(session: XenAPI.Session, metrics: dict):
-    """
-    Collect multipath status metrics for hosts and SRs.
-    Sets metrics indicating multipath enablement on hosts and activation on SRs.
-    """
-    try:
-        # Collect host-level multipath status
-        host_records = session.xenapi.host.get_all_records()
-        for host_ref, host_record in host_records.items():
-            try:
-                host_name = host_record.get("name_label", "unknown")
-                host_uuid = host_record.get("uuid", "unknown")
-
-                # Check multipath in other_config
-                other_config = host_record.get("other_config", {})
-                multipath_enabled = other_config.get("multipathing", "false")
-                enabled_val = 1 if str(multipath_enabled).lower() == "true" else 0
-
-                metrics['host_multipath_enabled'].labels(
-                    host=host_name,
-                    host_uuid=host_uuid
-                ).set(enabled_val)
-
-            except Exception as e:
-                logging.warning("Error processing host multipath record: %s", e)
-                continue
-
-        # Collect SR-level multipath status via PBDs
-        pbd_records = session.xenapi.PBD.get_all_records()
-        sr_cache = {}
-        sr_multipath_seen = set()
-
-        for pbd_ref, pbd_record in pbd_records.items():
-            try:
-                sr_ref = pbd_record.get("SR")
-                if not sr_ref:
-                    continue
-
-                # Cache SR record
-                if sr_ref not in sr_cache:
-                    sr_cache[sr_ref] = session.xenapi.SR.get_record(sr_ref)
-                sr_record = sr_cache[sr_ref]
-
-                sr_name = sr_record.get("name_label", "unknown")
-                sr_uuid = sr_record.get("uuid", "unknown")
-
-                # Only emit one metric per SR (not per PBD)
-                if sr_uuid in sr_multipath_seen:
-                    continue
-                sr_multipath_seen.add(sr_uuid)
-
-                # Check device_config for multipath info
-                device_config = pbd_record.get("device_config", {})
-                multipath_val = device_config.get("multipath", "false")
-                multipath_active = 1 if str(multipath_val).lower() == "true" else 0
-
-                metrics['sr_multipath_active'].labels(
-                    sr=sr_name,
-                    sr_uuid=sr_uuid
-                ).set(multipath_active)
-
-            except Exception as e:
-                logging.warning("Error processing SR multipath record: %s", e)
-                continue
-
-    except Exception as e:
-        # If we can't get records, log the error
-        # This ensures the exporter continues working even if API fails
-        logging.error("Failed to collect multipath status: %s", e)
 
 
 class Xen:
@@ -1020,226 +798,6 @@ def get_host_credentials(
     return (default_user, default_password)
 
 
-def set_metric_value(metrics: dict, registry: CollectorRegistry, metric_key: str, labels: dict, value: float):
-    """Safely set a metric value, creating dynamic metrics if needed."""
-    if metric_key not in metrics:
-        # Create a dynamic metric for unknown RRD metrics
-        metric_name = f"xen_{metric_key}"
-        label_names = list(labels.keys())
-        try:
-            metrics[metric_key] = Gauge(
-                metric_name,
-                f"Dynamic metric: {metric_key}",
-                label_names,
-                registry=registry
-            )
-            logging.debug("Created dynamic metric: %s with labels %s", metric_name, label_names)
-        except Exception as e:
-            logging.warning("Failed to create dynamic metric %s: %s", metric_key, e)
-            return
-
-    try:
-        metrics[metric_key].labels(**labels).set(value)
-    except Exception as e:
-        logging.debug("Failed to set metric %s with labels %s: %s", metric_key, labels, e)
-
-
-def collect_metrics():
-    # Cleanup caches if they've grown too large
-    _cleanup_cache_if_needed()
-
-    # Create fresh registry for this scrape
-    registry, metrics = create_metrics_registry()
-
-    xen_user = os.getenv("XEN_USER", "root")
-    xen_password = os.getenv("XEN_PASSWORD", "")
-    xen_host = os.getenv("XEN_HOST", "localhost")
-    xen_mode = os.getenv("XEN_MODE", "host")
-    xen_credentials = os.getenv("XEN_CREDENTIALS")
-    verify_ssl = parse_bool_env("XEN_SSL_VERIFY", default=True)
-    halt_on_no_uuid = parse_bool_env("HALT_ON_NO_UUID", default=False)
-
-    # Parse per-host credentials (falls back to XEN_USER/XEN_PASSWORD if not specified)
-    host_credentials = parse_credentials(xen_credentials, xen_user, xen_password)
-
-    # Enable/disable PBD and multipath metrics collection (enabled by default)
-    collect_pbd = parse_bool_env("XEN_COLLECT_PBD", default=True)
-    collect_multipath = parse_bool_env("XEN_COLLECT_MULTIPATH", default=True)
-
-    collector_start_time = time.perf_counter()
-
-    # Get credentials for poolmaster (use specific if available, else default)
-    poolmaster_user, poolmaster_pass = get_host_credentials(
-        xen_host, host_credentials, xen_user, xen_password
-    )
-
-    xen_poolmaster = collect_poolmaster(
-        xen_user=poolmaster_user,
-        xen_password=poolmaster_pass,
-        xen_host=xen_host,
-        verify_ssl=verify_ssl,
-    )
-
-    # Get credentials for the actual poolmaster address (may differ from xen_host)
-    poolmaster_user, poolmaster_pass = get_host_credentials(
-        xen_poolmaster, host_credentials, xen_user, xen_password
-    )
-
-    with Xen("https://" + xen_poolmaster, poolmaster_user, poolmaster_pass, verify_ssl) as xen:
-        if xen_mode == "host":
-            xen_hosts = [xen_host]
-        else:
-            xen_hosts = get_all_hosts_in_pool(xen)
-
-        for current_host in xen_hosts:
-            host_name = None
-            host_uuid = None
-            url = f"https://{current_host}/rrd_updates?start={int(time.time()-DEFAULT_METRICS_WINDOW_SECONDS)}&json=true&host=true&cf=AVERAGE"
-
-            # Get credentials for this specific host
-            current_user, current_pass = get_host_credentials(
-                current_host, host_credentials, xen_user, xen_password
-            )
-
-            req = urllib.request.Request(url)
-            req.add_header(
-                "Authorization",
-                "Basic "
-                + base64.b64encode((current_user + ":" + current_pass).encode("utf-8")).decode(
-                    "utf-8"
-                ),
-            )
-            res = urllib.request.urlopen(
-                req,
-                context=None if verify_ssl else ssl._create_unverified_context(),
-                timeout=HTTP_TIMEOUT_SECONDS
-            )
-            rrd_metrics = pyjson5.decode_io(res)
-
-            for metric_name in rrd_metrics["meta"]["legend"]:
-                metric_legend = metric_name.split(":")[1:]
-                if len(metric_legend) < 3:
-                    logging.warning("Invalid metric legend format (expected 3+ parts): %s", metric_name)
-                    continue
-                collector_type = metric_legend[0]
-                collector = metric_legend[1]
-
-                if collector_type == 'host':
-                    host = get_or_set(hosts, collector, lookup_host_name, xen)
-                    host_name = host
-                    host_uuid = collector
-                    break
-
-            if host_name is None or host_uuid is None:
-                raise RuntimeError("Hostname or UUID not found in any retrieved data")
-
-            for metric_idx, metric_name in enumerate(rrd_metrics["meta"]["legend"]):
-                metric_legend = metric_name.split(":")[1:]
-                if len(metric_legend) < 3:
-                    continue  # Already logged in the first loop
-                collector_type = metric_legend[0]
-                collector = metric_legend[1]
-                metric_type = metric_legend[2]
-                extra_tags = {}
-
-                if collector_type == "vm":
-                    vm = get_or_set(vms, collector, lookup_vm_name, xen)
-                    extra_tags["vm"] = vm
-                    extra_tags["vm_uuid"] = collector
-                    extra_tags['host'] = host_name
-                    extra_tags['host_uuid'] = host_uuid
-                elif collector_type == 'host':
-                    extra_tags['host'] = host_name
-                    extra_tags['host_uuid'] = host_uuid
-
-                if collector_type == "host" and "sr_" in metric_type:
-                    sr_parts = metric_type.split("sr_", 1)
-                    if len(sr_parts) > 1 and sr_parts[1]:
-                        x = sr_parts[1]
-                        x_parts = x.split("_")
-                        sr = get_or_set(srs, x_parts[0], lookup_sr_name_by_uuid, xen)
-                        extra_tags["sr"] = sr
-                        extra_tags["sr_uuid"] = x_parts[0]
-                        metric_type = "sr_" + "_".join(x_parts[1:])
-
-                # Handle SR metrics which don't have a full UUID (and don't have sr_)
-                if (
-                    collector_type == "host"
-                    and len(metric_type.split("_")[-1]) == SHORT_SR_UUID_LENGTH
-                    and "_".join(metric_type.split("_")[0:-1]) in sr_metrics
-                ):
-                    short_sr = metric_type.split("_")[-1]
-                    long_sr = find_full_sr_uuid(short_sr, xen, halt_on_no_uuid)
-                    if long_sr is not None:
-                        sr = get_or_set(srs, long_sr, lookup_sr_name_by_uuid, xen)
-                        extra_tags["sr"] = sr
-                        extra_tags["sr_uuid"] = long_sr
-                    metric_type = "_".join(metric_type.split("_")[0:-1])
-
-                if collector_type == "vm" and "vbd_" in metric_type:
-                    vbd_parts = metric_type.split("vbd_", 1)
-                    if len(vbd_parts) > 1 and vbd_parts[1]:
-                        x_parts = vbd_parts[1].split("_")
-                        extra_tags["vbd"] = x_parts[0]
-                        metric_type = "vbd_" + "_".join(x_parts[1:])
-
-                if collector_type == "vm" and "vif_" in metric_type:
-                    vif_parts = metric_type.split("vif_", 1)
-                    if len(vif_parts) > 1 and vif_parts[1]:
-                        x_parts = vif_parts[1].split("_")
-                        extra_tags["vif"] = x_parts[0]
-                        metric_type = "vif_" + "_".join(x_parts[1:])
-
-                if collector_type == "host" and "pif_" in metric_type:
-                    pif_parts = metric_type.split("pif_", 1)
-                    if len(pif_parts) > 1 and pif_parts[1]:
-                        x_parts = pif_parts[1].split("_")
-                        extra_tags["pif"] = x_parts[0]
-                        metric_type = "pif_" + "_".join(x_parts[1:])
-
-                if "cpu" in metric_type:
-                    cpu_parts = metric_type.split("cpu", 1)
-                    if len(cpu_parts) > 1 and cpu_parts[1]:
-                        x = cpu_parts[1]
-                        if x.isnumeric():
-                            extra_tags["cpu"] = x
-                            metric_type = "cpu"
-                        elif "-" in x:
-                            x_parts = x.split("-", 1)
-                            extra_tags["cpu"] = x_parts[0]
-                            metric_type = "cpu_" + x_parts[1] if len(x_parts) > 1 else "cpu"
-                if "CPU" in metric_type:
-                    cpu_parts = metric_type.split("CPU", 1)
-                    if len(cpu_parts) > 1 and cpu_parts[1]:
-                        x = cpu_parts[1]
-                        x_parts = x.split("-")
-                        extra_tags["cpu"] = x_parts[0]
-                        metric_type = "cpu_" + "_".join(x_parts[1:]) if len(x_parts) > 1 else "cpu"
-
-                # Normalize metric names to lowercase and underscores
-                metric_type = metric_type.lower().replace("-", "_")
-
-                # Build metric key: {collector_type}_{metric_type}
-                metric_key = f"{collector_type}_{metric_type}"
-                value = rrd_metrics['data'][0]['values'][metric_idx]
-
-                # Set the metric value using the helper function
-                set_metric_value(metrics, registry, metric_key, extra_tags, float(value))
-
-        collect_sr_usage(xen, metrics)
-
-        # Collect PBD status metrics if enabled
-        if collect_pbd:
-            collect_pbd_status(xen, metrics)
-
-        # Collect multipath status metrics if enabled
-        if collect_multipath:
-            collect_multipath_status(xen, metrics)
-
-        collector_end_time = time.perf_counter()
-        metrics['collector_duration_seconds'].set(collector_end_time - collector_start_time)
-
-        return generate_latest(registry)
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -1271,7 +829,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         try:
-            metric_output = collect_metrics()
+            metric_output = generate_latest(REGISTRY)
             self.send_response(200)
             self.send_header("Content-type", CONTENT_TYPE_LATEST)
             self.send_header("Content-Length", str(len(metric_output)))
@@ -1327,6 +885,9 @@ if __name__ == "__main__":
 
     port = os.getenv("PORT", str(DEFAULT_PORT))
     bind = os.getenv("BIND", DEFAULT_BIND_ADDRESS)
+
+    # Register the XenCollector with the global registry
+    REGISTRY.register(XenCollector())
 
     logging.info("Starting xen-exporter on %s:%s", bind, port)
     http.server.HTTPServer(
