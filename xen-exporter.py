@@ -374,14 +374,13 @@ def collect_metrics():
             )
             metrics = pyjson5.decode_io(res)
 
-            for i, metric_name in enumerate(metrics["meta"]["legend"]):
+            for metric_name in metrics["meta"]["legend"]:
                 metric_legend = metric_name.split(":")[1:]
                 if len(metric_legend) < 3:
                     logging.warning("Invalid metric legend format (expected 3+ parts): %s", metric_name)
                     continue
                 collector_type = metric_legend[0]
                 collector = metric_legend[1]
-                metric_type = metric_legend[2]
 
                 if collector_type == 'host':
                     host = get_or_set(hosts, collector, lookup_host_name, xen)
@@ -392,7 +391,7 @@ def collect_metrics():
             if host_name is None or host_uuid is None:
                 raise RuntimeError("Hostname or UUID not found in any retrieved data")
 
-            for i, metric_name in enumerate(metrics["meta"]["legend"]):
+            for metric_idx, metric_name in enumerate(metrics["meta"]["legend"]):
                 metric_legend = metric_name.split(":")[1:]
                 if len(metric_legend) < 3:
                     continue  # Already logged in the first loop
@@ -479,7 +478,7 @@ def collect_metrics():
                 metric_type = metric_type.lower().replace("-", "_")
 
                 tags = {f'{k}="{v}"' for k, v in extra_tags.items()}
-                output += f"xen_{collector_type}_{metric_type}{{{', '.join(tags)}}} {metrics['data'][0]['values'][i]}\n"
+                output += f"xen_{collector_type}_{metric_type}{{{', '.join(tags)}}} {metrics['data'][0]['values'][metric_idx]}\n"
 
         output += collect_sr_usage(xen)
 
