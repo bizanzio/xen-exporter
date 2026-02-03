@@ -296,15 +296,15 @@ def collect_metrics():
 
     with Xen("https://" + xen_poolmaster, xen_user, xen_password, verify_ssl) as xen:
         if xen_mode == "host":
-            xen_hosts =[xen_host] 
+            xen_hosts = [xen_host]
         else:
             xen_hosts = get_all_hosts_in_pool(xen)
 
         output = ""
-        for xen_host in xen_hosts:
+        for current_host in xen_hosts:
             host_name = None
             host_uuid = None
-            url = f"https://{xen_host}/rrd_updates?start={int(time.time()-10)}&json=true&host=true&cf=AVERAGE"
+            url = f"https://{current_host}/rrd_updates?start={int(time.time()-10)}&json=true&host=true&cf=AVERAGE"
 
             req = urllib.request.Request(url)
             req.add_header(
