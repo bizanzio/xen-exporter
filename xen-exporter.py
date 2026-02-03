@@ -98,7 +98,7 @@ def lookup_sr_uuid_by_ref(sr_ref, session):
 
 
 def find_full_sr_uuid(beginning_uuid, xen, halt_on_no_uuid):
-    for i in range(0, 2):
+    for _ in range(2):
         with _cache_lock:
             uuid = list(filter(lambda x: x.startswith(beginning_uuid), all_srs))
         if len(uuid) == 0:
