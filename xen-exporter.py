@@ -1,25 +1,19 @@
 import base64
-import http.server
 import logging
 import shlex
-import socket
+import signal
+import sys
 import urllib.request
 import time
-import traceback
 import ssl
 import os
 import re
 import threading
-from typing import Any, Optional
+from typing import Optional
 
 import pyjson5
 import XenAPI
-from prometheus_client import (
-    REGISTRY,
-    Gauge,
-    generate_latest,
-    CONTENT_TYPE_LATEST,
-)
+from prometheus_client import REGISTRY, start_http_server
 from prometheus_client.core import GaugeMetricFamily
 
 # Configure logging
@@ -800,52 +794,6 @@ def get_host_credentials(
 
 
 
-class Handler(http.server.BaseHTTPRequestHandler):
-    def __init__(self, request: socket.socket, client_address: tuple[str, int], server: Any) -> None:
-        super().__init__(request, client_address, server)
-
-    def log_message(self, format: str, *args) -> None:
-        """Override to use our configured logger instead of stderr."""
-        logging.info("%s - %s", self.address_string(), format % args)
-
-    def do_GET(self):
-        # Health check endpoint
-        if self.path == "/health":
-            self.send_response(200)
-            self.send_header("Content-type", "text/plain")
-            self.send_header("Content-Length", "3")
-            self.end_headers()
-            self.wfile.write(b"OK\n")
-            return
-
-        # Metrics endpoint (/ or /metrics)
-        if self.path not in ("/", "/metrics"):
-            self.send_response(404)
-            self.send_header("Content-type", "text/plain")
-            error_msg = b"Not Found\n"
-            self.send_header("Content-Length", str(len(error_msg)))
-            self.end_headers()
-            self.wfile.write(error_msg)
-            return
-
-        try:
-            metric_output = generate_latest(REGISTRY)
-            self.send_response(200)
-            self.send_header("Content-type", CONTENT_TYPE_LATEST)
-            self.send_header("Content-Length", str(len(metric_output)))
-            self.end_headers()
-            self.wfile.write(metric_output)
-        except BaseException:
-            error_msg = traceback.format_exc()
-            logging.error("Error collecting metrics: %s", error_msg)
-            self.send_response(500)
-            self.send_header("Content-type", "text/plain")
-            error_response = b"Internal Server Error\n"
-            self.send_header("Content-Length", str(len(error_response)))
-            self.end_headers()
-            self.wfile.write(error_response)
-
-
 def validate_config():
     """Validate environment variables at startup."""
     errors = []
@@ -880,20 +828,38 @@ def validate_config():
         raise ValueError("Invalid configuration: " + "; ".join(errors))
 
 
-if __name__ == "__main__":
+def main():
+    """Main entry point for the exporter."""
     validate_config()
 
-    port = os.getenv("PORT", str(DEFAULT_PORT))
+    port = int(os.getenv("PORT", str(DEFAULT_PORT)))
     bind = os.getenv("BIND", DEFAULT_BIND_ADDRESS)
 
     # Register the XenCollector with the global registry
     REGISTRY.register(XenCollector())
 
+    # Start the HTTP server (threaded, handles concurrent requests)
     logging.info("Starting xen-exporter on %s:%s", bind, port)
-    http.server.HTTPServer(
-        (
-            bind,
-            int(port),
-        ),
-        Handler,
-    ).serve_forever()
+    start_http_server(port, addr=bind)
+
+    # Set up signal handlers for graceful shutdown
+    shutdown_event = threading.Event()
+
+    def signal_handler(signum, frame):
+        signame = signal.Signals(signum).name
+        logging.info("Received %s, shutting down...", signame)
+        shutdown_event.set()
+
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+
+    # Wait for shutdown signal
+    logging.info("Exporter is ready. Press Ctrl+C to stop.")
+    shutdown_event.wait()
+
+    logging.info("Exporter stopped.")
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
