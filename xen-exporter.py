@@ -6,6 +6,7 @@ import traceback
 import ssl
 import os
 import re
+import threading
 
 import pyjson5
 import XenAPI
@@ -13,6 +14,8 @@ import XenAPI
 
 # We aggressively cache the SRs, VMs, and hosts to avoid calling XAPI which can double the runtime (~0.8s to ~1.5s)
 # Mapping from UUID to human readable name
+# Thread lock to protect cache access from concurrent HTTP requests
+_cache_lock = threading.Lock()
 srs = dict()
 vms = dict()
 hosts = dict()
@@ -51,16 +54,17 @@ def lookup_sr_uuid_by_ref(sr_ref, session):
 
 def find_full_sr_uuid(beginning_uuid, xen, halt_on_no_uuid):
     for i in range(0, 2):
-        uuid = list(filter(lambda x: x.startswith(beginning_uuid), all_srs))
+        with _cache_lock:
+            uuid = list(filter(lambda x: x.startswith(beginning_uuid), all_srs))
         if len(uuid) == 0:
-            all_srs.update(
-                set(
-                    map(
-                        lambda x: lookup_sr_uuid_by_ref(x, xen),
-                        xen.xenapi.SR.get_all(),
-                    )
+            new_srs = set(
+                map(
+                    lambda x: lookup_sr_uuid_by_ref(x, xen),
+                    xen.xenapi.SR.get_all(),
                 )
             )
+            with _cache_lock:
+                all_srs.update(new_srs)
             continue  # skip the rest of the loop and try the search again
         elif len(uuid) > 1:
             raise Exception(f"Found multiple SRs starting with UUID {beginning_uuid}")
@@ -71,9 +75,10 @@ def find_full_sr_uuid(beginning_uuid, xen, halt_on_no_uuid):
 
 
 def get_or_set(d, key, func, *args):
-    if key not in d:
-        d[key] = func(key, *args)
-    return d[key]
+    with _cache_lock:
+        if key not in d:
+            d[key] = func(key, *args)
+        return d[key]
 
 
 def collect_poolmaster(
