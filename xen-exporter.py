@@ -170,6 +170,7 @@ METRIC_DEFINITIONS = {
 
     # Collector Metrics
     'collector_duration_seconds': ('xen_collector_duration_seconds', 'Time taken to collect all metrics in seconds', []),
+    'up': ('xen_up', 'Whether the last scrape was successful (1 = success, 0 = failure)', []),
 }
 
 
@@ -213,6 +214,8 @@ class XenCollector:
         collected_metrics = {}
         # Track dynamic metrics discovered during collection
         dynamic_metrics = {}
+        # Track scrape success status
+        scrape_success = True
 
         collector_start_time = time.perf_counter()
 
@@ -258,12 +261,16 @@ class XenCollector:
 
         except Exception as e:
             logging.error("Error during metric collection: %s", e)
+            scrape_success = False
             # Continue to yield whatever metrics we collected
 
         # Record collection duration
         collector_end_time = time.perf_counter()
         duration = collector_end_time - collector_start_time
         collected_metrics['collector_duration_seconds'] = {(): duration}
+
+        # Record scrape success status (1 = success, 0 = failure)
+        collected_metrics['up'] = {(): 1 if scrape_success else 0}
 
         # Yield all collected metrics as GaugeMetricFamily objects
         yield from self._yield_metrics(collected_metrics, dynamic_metrics)

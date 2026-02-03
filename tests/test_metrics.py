@@ -164,3 +164,10 @@ class TestMetricCoverage:
     def test_collector_metrics_exist(self):
         """Collector self-metrics should be defined."""
         assert 'collector_duration_seconds' in METRIC_DEFINITIONS
+        assert 'up' in METRIC_DEFINITIONS
+
+    def test_up_metric_has_no_labels(self):
+        """The xen_up metric should have no labels."""
+        prom_name, help_text, labels = METRIC_DEFINITIONS['up']
+        assert prom_name == 'xen_up'
+        assert labels == []

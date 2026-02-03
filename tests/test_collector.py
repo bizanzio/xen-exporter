@@ -136,6 +136,42 @@ class TestMetricStorage:
         assert collected['host_cpu'][('host1', 'uuid-1', '1')] == 0.50
 
 
+class TestUpMetric:
+    """Test the xen_up metric for scrape success/failure tracking."""
+
+    def test_up_metric_on_success(self, monkeypatch):
+        """Test that xen_up is 1 when collection succeeds."""
+        monkeypatch.delenv('XEN_CREDENTIALS', raising=False)
+        collector = XenCollector()
+        collected = {
+            'up': {(): 1},
+            'collector_duration_seconds': {(): 0.5}
+        }
+        dynamic = {}
+
+        metrics = list(collector._yield_metrics(collected, dynamic))
+        up_metric = next((m for m in metrics if m.name == 'xen_up'), None)
+
+        assert up_metric is not None
+        assert up_metric.samples[0].value == 1
+
+    def test_up_metric_on_failure(self, monkeypatch):
+        """Test that xen_up is 0 when collection fails."""
+        monkeypatch.delenv('XEN_CREDENTIALS', raising=False)
+        collector = XenCollector()
+        collected = {
+            'up': {(): 0},
+            'collector_duration_seconds': {(): 0.1}
+        }
+        dynamic = {}
+
+        metrics = list(collector._yield_metrics(collected, dynamic))
+        up_metric = next((m for m in metrics if m.name == 'xen_up'), None)
+
+        assert up_metric is not None
+        assert up_metric.samples[0].value == 0
+
+
 class TestYieldMetrics:
     """Test the _yield_metrics method."""
 
