@@ -17,6 +17,10 @@ docker run -e XEN_USER=root -e XEN_PASSWORD=<password> -e XEN_HOST=<host> -e XEN
 
 > XEN_COLLECT_MULTIPATH - optional, "true" by default. Collect multipath status metrics for hosts and SRs
 
+> PORT - optional, 9100 by default. HTTP server port for the metrics endpoint
+
+> BIND - optional, "0.0.0.0" by default. Network interface to bind to
+
 # Grafana
 A Grafana dashboard is [available here](https://grafana.com/grafana/dashboards/16588) (id 16588), which graphs most of the critical metrics
 gathered by this exporter.

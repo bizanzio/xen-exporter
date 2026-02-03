@@ -98,6 +98,7 @@ This document provides a complete reference of all metrics exported by xen-expor
 |--------|------|------|-------------|
 | `xen_host_pool_session_count` | Gauge | Count | Active pool sessions |
 | `xen_host_pool_task_count` | Gauge | Count | Active pool tasks |
+| `xen_host_pool_session_creation_rate` | Gauge | Rate | Rate of pool session creation |
 
 #### Other Host Metrics
 | Metric | Type | Unit | Description |
@@ -118,6 +119,7 @@ This document provides a complete reference of all metrics exported by xen-expor
 | Metric | Type | Unit | Description |
 |--------|------|------|-------------|
 | `xen_vm_cpu` | Gauge | Ratio (0-1) | VM CPU utilization per vCPU |
+| `xen_vm_cpu_usage` | Gauge | Ratio | VM total CPU usage |
 
 #### Memory Metrics
 | Metric | Type | Unit | Description |

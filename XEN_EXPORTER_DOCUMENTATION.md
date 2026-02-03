@@ -54,7 +54,7 @@ URL: https://<xen_host>/rrd_updates?start=<timestamp>&json=true&host=true&cf=AVE
 3. Receives JSON5 formatted response containing all metrics
 4. Parses the legend to extract metric names and associated metadata
 
-**Code Reference (Line 360-375):**
+**Code Reference:**
 ```python
 url = f"https://{current_host}/rrd_updates?start={int(time.time()-DEFAULT_METRICS_WINDOW_SECONDS)}&json=true&host=true&cf=AVERAGE"
 
@@ -82,7 +82,7 @@ sr_records = session.xenapi.SR.get_all_records()
 3. Queries Storage Repository (SR) records directly
 4. Extracts physical_size, physical_utilisation, virtual_allocation
 
-**Code Reference (Line 145-159):**
+**Code Reference:**
 ```python
 def collect_sr_usage(session: XenAPI.Session):
     sr_records = session.xenapi.SR.get_all_records()
@@ -181,7 +181,7 @@ The exporter reports its own collection time:
 xen_collector_duration_seconds <value>
 ```
 
-**Code Reference (Line 493-494):**
+**Code Reference:**
 ```python
 collector_end_time = time.perf_counter()
 output += f"xen_collector_duration_seconds {collector_end_time - collector_start_time}\n"
@@ -233,7 +233,7 @@ output += f"xen_collector_duration_seconds {collector_end_time - collector_start
 | **CPU** | 0.1 vCPU | 0.5 vCPU |
 | **RAM** | 64 MB | 128 MB |
 | **Network** | 1 Mbps | 10 Mbps |
-| **Python** | 3.10+ | 3.10+ |
+| **Python** | 3.12+ | 3.14+ |
 
 ### 4.5 Scalability Considerations
 
@@ -455,17 +455,17 @@ networks:
 The current exporter uses **Basic Authentication** with username/password:
 
 ```python
-# Current implementation (xen-exporter.py lines 331-332)
+# Current implementation
 xen_user = os.getenv("XEN_USER", "root")
 xen_password = os.getenv("XEN_PASSWORD", "")
 
-# Used for RRD API (line 362-368)
+# Used for RRD API
 req.add_header(
     "Authorization",
     "Basic " + base64.b64encode((xen_user + ":" + xen_password).encode("utf-8")).decode("utf-8"),
 )
 
-# Used for XenAPI (line 285-286)
+# Used for XenAPI
 self.session.xenapi.login_with_password(username, password, "1.0", "xen-exporter")
 ```
 
@@ -984,7 +984,7 @@ Multipath I/O (MPIO) provides redundant paths to storage devices, improving avai
 | `xen_host_multipath_enabled` | Gauge | Whether multipath is enabled on the host (1=enabled, 0=disabled) |
 | `xen_sr_multipath_active` | Gauge | Whether multipath is active for the SR (1=active, 0=inactive) |
 
-**Implementation:** See `collect_multipath_status()` function in xen-exporter.py (lines 214-279).
+**Implementation:** See `collect_multipath_status()` function in xen-exporter.py.
 
 **Labels:**
 | Label | Description |
@@ -1066,7 +1066,7 @@ Information about backend storage targets (iSCSI, NFS, Fibre Channel) including 
 
 ### 9.6 Integration Point
 
-PBD and multipath metrics are already integrated in `collect_metrics()` (lines 483-491):
+PBD and multipath metrics are already integrated in `collect_metrics()`:
 
 ```python
 def collect_metrics():
