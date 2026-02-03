@@ -82,6 +82,7 @@ def find_full_sr_uuid(beginning_uuid, xen, halt_on_no_uuid):
         return uuid
     if halt_on_no_uuid:
         raise Exception(f"Found no SRs starting with UUID {beginning_uuid}")
+    return None
 
 
 def get_or_set(d, key, func, *args):
