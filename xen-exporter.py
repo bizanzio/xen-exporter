@@ -1,6 +1,7 @@
 import base64
 import http.server
 import logging
+import socket
 import urllib.request
 import time
 import traceback
@@ -8,6 +9,7 @@ import ssl
 import os
 import re
 import threading
+from typing import Any
 
 import pyjson5
 import XenAPI
@@ -438,7 +440,7 @@ def collect_metrics():
         return output
     
 class Handler(http.server.BaseHTTPRequestHandler):
-    def __init__(self, request: bytes, client_address: tuple[str, int], server) -> None:
+    def __init__(self, request: socket.socket, client_address: tuple[str, int], server: Any) -> None:
         super().__init__(request, client_address, server)
 
     def do_GET(self):
