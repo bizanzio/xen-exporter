@@ -279,23 +279,29 @@ sr_metrics = set(
     ]
 )
 
+
+def parse_bool_env(env_var: str, default: bool = False) -> bool:
+    """Parse a boolean environment variable safely.
+
+    Accepts 'true', '1', 'yes' (case-insensitive) as True, anything else as False.
+    """
+    value = os.getenv(env_var)
+    if value is None:
+        return default
+    return value.lower() in ("true", "1", "yes")
+
+
 def collect_metrics():
     xen_user = os.getenv("XEN_USER", "root")
     xen_password = os.getenv("XEN_PASSWORD", "")
     xen_host = os.getenv("XEN_HOST", "localhost")
     xen_mode = os.getenv("XEN_MODE", "host")
-    verify_ssl = os.getenv("XEN_SSL_VERIFY", "true")
-    verify_ssl = True if verify_ssl.lower() == "true" else False
-
-    halt_on_no_uuid = os.getenv("HALT_ON_NO_UUID", "false")
-    halt_on_no_uuid = True if halt_on_no_uuid.lower() == "true" else False
+    verify_ssl = parse_bool_env("XEN_SSL_VERIFY", default=True)
+    halt_on_no_uuid = parse_bool_env("HALT_ON_NO_UUID", default=False)
 
     # Enable/disable PBD and multipath metrics collection (enabled by default)
-    collect_pbd = os.getenv("XEN_COLLECT_PBD", "true")
-    collect_pbd = True if collect_pbd.lower() == "true" else False
-
-    collect_multipath = os.getenv("XEN_COLLECT_MULTIPATH", "true")
-    collect_multipath = True if collect_multipath.lower() == "true" else False
+    collect_pbd = parse_bool_env("XEN_COLLECT_PBD", default=True)
+    collect_multipath = parse_bool_env("XEN_COLLECT_MULTIPATH", default=True)
 
     collector_start_time = time.perf_counter()
     xen_poolmaster = collect_poolmaster(
