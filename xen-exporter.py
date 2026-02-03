@@ -517,13 +517,42 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(b"Internal Server Error\n")
 
 
+def validate_config():
+    """Validate environment variables at startup."""
+    errors = []
+
+    # Validate XEN_HOST is set (required for operation)
+    xen_host = os.getenv("XEN_HOST")
+    if not xen_host:
+        logging.warning("XEN_HOST not set, using default 'localhost'")
+
+    # Validate XEN_MODE
+    xen_mode = os.getenv("XEN_MODE")
+    if xen_mode and xen_mode not in ("host", "pool"):
+        errors.append(f"XEN_MODE must be 'host' or 'pool', got: {xen_mode}")
+
+    # Validate PORT is numeric
+    port = os.getenv("PORT", str(DEFAULT_PORT))
+    try:
+        port_int = int(port)
+        if port_int < 1 or port_int > 65535:
+            errors.append(f"PORT must be between 1 and 65535, got: {port}")
+    except ValueError:
+        errors.append(f"PORT must be a number, got: {port}")
+
+    if errors:
+        for error in errors:
+            logging.error("Configuration error: %s", error)
+        raise ValueError("Invalid configuration: " + "; ".join(errors))
+
+
 if __name__ == "__main__":
+    validate_config()
+
     port = os.getenv("PORT", str(DEFAULT_PORT))
     bind = os.getenv("BIND", DEFAULT_BIND_ADDRESS)
 
-    if os.getenv("XEN_MODE"):
-        if os.getenv("XEN_MODE", "host") != "host" and os.getenv("XEN_MODE", "host") != "pool":
-            raise Exception(f"Incorrect Mode: host or pool is required")
+    logging.info("Starting xen-exporter on %s:%s", bind, port)
     http.server.HTTPServer(
         (
             bind,
