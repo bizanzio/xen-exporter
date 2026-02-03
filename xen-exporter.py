@@ -13,7 +13,7 @@ from typing import Optional
 
 import pyjson5
 import XenAPI
-from prometheus_client import REGISTRY, start_http_server
+from prometheus_client import REGISTRY, start_http_server, Histogram
 from prometheus_client.core import GaugeMetricFamily
 
 # Configure logging
@@ -39,6 +39,36 @@ srs = dict()
 vms = dict()
 hosts = dict()
 all_srs = set()
+
+
+# =============================================================================
+# Persistent Metrics (outside of Collector pattern)
+# =============================================================================
+
+# Histogram for scrape duration - this is a persistent metric that accumulates
+# across scrapes, unlike the GaugeMetricFamily metrics yielded by the collector.
+# Buckets are chosen to cover typical scrape times from fast (0.1s) to slow (30s)
+_SCRAPE_DURATION_BUCKETS = (0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 15.0, 30.0, float('inf'))
+
+
+def _create_scrape_histogram():
+    """Create the scrape duration histogram, handling re-registration gracefully."""
+    try:
+        return Histogram(
+            'xen_scrape_duration_seconds',
+            'Histogram of scrape durations in seconds',
+            buckets=_SCRAPE_DURATION_BUCKETS
+        )
+    except ValueError:
+        # Already registered (happens during testing when module is reloaded)
+        # Return the existing metric from the registry
+        for collector in REGISTRY._names_to_collectors.values():
+            if hasattr(collector, '_name') and collector._name == 'xen_scrape_duration_seconds':
+                return collector
+        raise
+
+
+SCRAPE_DURATION_HISTOGRAM = _create_scrape_histogram()
 
 
 # =============================================================================
@@ -268,6 +298,9 @@ class XenCollector:
         collector_end_time = time.perf_counter()
         duration = collector_end_time - collector_start_time
         collected_metrics['collector_duration_seconds'] = {(): duration}
+
+        # Record scrape duration in histogram (persistent metric)
+        SCRAPE_DURATION_HISTOGRAM.observe(duration)
 
         # Record scrape success status (1 = success, 0 = failure)
         collected_metrics['up'] = {(): 1 if scrape_success else 0}

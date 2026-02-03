@@ -17,6 +17,7 @@ spec.loader.exec_module(xen_exporter)
 
 XenCollector = xen_exporter.XenCollector
 METRIC_DEFINITIONS = xen_exporter.METRIC_DEFINITIONS
+SCRAPE_DURATION_HISTOGRAM = xen_exporter.SCRAPE_DURATION_HISTOGRAM
 
 
 class TestXenCollectorInit:
@@ -134,6 +135,25 @@ class TestMetricStorage:
         assert len(collected['host_cpu']) == 2
         assert collected['host_cpu'][('host1', 'uuid-1', '0')] == 0.25
         assert collected['host_cpu'][('host1', 'uuid-1', '1')] == 0.50
+
+
+class TestScrapeHistogram:
+    """Test the scrape duration histogram."""
+
+    def test_histogram_exists(self):
+        """Test that the scrape duration histogram is defined."""
+        assert SCRAPE_DURATION_HISTOGRAM is not None
+        assert SCRAPE_DURATION_HISTOGRAM._name == 'xen_scrape_duration_seconds'
+
+    def test_histogram_buckets(self):
+        """Test that histogram has appropriate buckets."""
+        # Buckets should cover typical scrape times
+        buckets = SCRAPE_DURATION_HISTOGRAM._upper_bounds
+        assert 0.1 in buckets
+        assert 1.0 in buckets
+        assert 10.0 in buckets
+        assert 30.0 in buckets
+        assert float('inf') in buckets
 
 
 class TestUpMetric:
