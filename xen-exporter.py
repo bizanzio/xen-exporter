@@ -1,6 +1,7 @@
 import base64
 import http.server
 import logging
+import shlex
 import socket
 import urllib.request
 import time
@@ -9,7 +10,7 @@ import ssl
 import os
 import re
 import threading
-from typing import Any
+from typing import Any, Optional
 
 import pyjson5
 import XenAPI
@@ -966,6 +967,59 @@ def parse_bool_env(env_var: str, default: bool = False) -> bool:
     return value.lower() in ("true", "1", "yes")
 
 
+def parse_credentials(xen_credentials: Optional[str], default_user: str, default_password: str) -> dict:
+    """Parse XEN_CREDENTIALS environment variable into a dict of host -> (user, password).
+
+    Format: one entry per line, each line has: host user password
+    Passwords with spaces can be quoted with single or double quotes.
+
+    Example:
+        10.10.10.1 admin1 password1
+        10.10.10.2 admin2 'password with spaces'
+
+    Returns:
+        dict mapping host address to (username, password) tuple
+    """
+    credentials = {}
+
+    if not xen_credentials:
+        return credentials
+
+    for line in xen_credentials.strip().splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+
+        try:
+            # Use shlex to handle quoted passwords
+            parts = shlex.split(line)
+            if len(parts) < 3:
+                logging.warning("Invalid credential line (need host user password): %s", line)
+                continue
+
+            host, user, password = parts[0], parts[1], parts[2]
+            credentials[host] = (user, password)
+            logging.debug("Loaded credentials for host: %s", host)
+
+        except ValueError as e:
+            logging.warning("Failed to parse credential line '%s': %s", line, e)
+            continue
+
+    return credentials
+
+
+def get_host_credentials(
+    host: str,
+    host_credentials: dict,
+    default_user: str,
+    default_password: str
+) -> tuple:
+    """Get credentials for a specific host, falling back to defaults."""
+    if host in host_credentials:
+        return host_credentials[host]
+    return (default_user, default_password)
+
+
 def set_metric_value(metrics: dict, registry: CollectorRegistry, metric_key: str, labels: dict, value: float):
     """Safely set a metric value, creating dynamic metrics if needed."""
     if metric_key not in metrics:
@@ -1001,22 +1055,37 @@ def collect_metrics():
     xen_password = os.getenv("XEN_PASSWORD", "")
     xen_host = os.getenv("XEN_HOST", "localhost")
     xen_mode = os.getenv("XEN_MODE", "host")
+    xen_credentials = os.getenv("XEN_CREDENTIALS")
     verify_ssl = parse_bool_env("XEN_SSL_VERIFY", default=True)
     halt_on_no_uuid = parse_bool_env("HALT_ON_NO_UUID", default=False)
+
+    # Parse per-host credentials (falls back to XEN_USER/XEN_PASSWORD if not specified)
+    host_credentials = parse_credentials(xen_credentials, xen_user, xen_password)
 
     # Enable/disable PBD and multipath metrics collection (enabled by default)
     collect_pbd = parse_bool_env("XEN_COLLECT_PBD", default=True)
     collect_multipath = parse_bool_env("XEN_COLLECT_MULTIPATH", default=True)
 
     collector_start_time = time.perf_counter()
+
+    # Get credentials for poolmaster (use specific if available, else default)
+    poolmaster_user, poolmaster_pass = get_host_credentials(
+        xen_host, host_credentials, xen_user, xen_password
+    )
+
     xen_poolmaster = collect_poolmaster(
-        xen_user=xen_user,
-        xen_password=xen_password,
+        xen_user=poolmaster_user,
+        xen_password=poolmaster_pass,
         xen_host=xen_host,
         verify_ssl=verify_ssl,
     )
 
-    with Xen("https://" + xen_poolmaster, xen_user, xen_password, verify_ssl) as xen:
+    # Get credentials for the actual poolmaster address (may differ from xen_host)
+    poolmaster_user, poolmaster_pass = get_host_credentials(
+        xen_poolmaster, host_credentials, xen_user, xen_password
+    )
+
+    with Xen("https://" + xen_poolmaster, poolmaster_user, poolmaster_pass, verify_ssl) as xen:
         if xen_mode == "host":
             xen_hosts = [xen_host]
         else:
@@ -1027,11 +1096,16 @@ def collect_metrics():
             host_uuid = None
             url = f"https://{current_host}/rrd_updates?start={int(time.time()-DEFAULT_METRICS_WINDOW_SECONDS)}&json=true&host=true&cf=AVERAGE"
 
+            # Get credentials for this specific host
+            current_user, current_pass = get_host_credentials(
+                current_host, host_credentials, xen_user, xen_password
+            )
+
             req = urllib.request.Request(url)
             req.add_header(
                 "Authorization",
                 "Basic "
-                + base64.b64encode((xen_user + ":" + xen_password).encode("utf-8")).decode(
+                + base64.b64encode((current_user + ":" + current_pass).encode("utf-8")).decode(
                     "utf-8"
                 ),
             )

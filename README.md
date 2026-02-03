@@ -18,8 +18,9 @@ docker run -e XEN_USER=root -e XEN_PASSWORD=<password> -e XEN_HOST=<host> \
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `XEN_HOST` | `localhost` | XenServer host IP/hostname |
-| `XEN_USER` | `root` | XenServer username |
-| `XEN_PASSWORD` | `""` | XenServer password (required) |
+| `XEN_USER` | `root` | XenServer username (default for all hosts) |
+| `XEN_PASSWORD` | `""` | XenServer password (default for all hosts) |
+| `XEN_CREDENTIALS` | `""` | Per-host credentials (see below) |
 | `XEN_SSL_VERIFY` | `true` | Enable SSL certificate verification |
 | `XEN_MODE` | `host` | `host` for single host, `pool` for all pool members |
 | `XEN_COLLECT_PBD` | `true` | Collect PBD attachment status metrics |
@@ -27,6 +28,40 @@ docker run -e XEN_USER=root -e XEN_PASSWORD=<password> -e XEN_HOST=<host> \
 | `HALT_ON_NO_UUID` | `false` | Halt on missing UUID vs silent ignore |
 | `PORT` | `9100` | HTTP server port |
 | `BIND` | `0.0.0.0` | Network interface to bind |
+
+### Per-Host Credentials
+
+When hosts in a pool have different credentials, use `XEN_CREDENTIALS` to specify them individually. Hosts not listed will use `XEN_USER`/`XEN_PASSWORD` as fallback.
+
+**Format:** One host per line: `host user password`
+
+```bash
+# Add hosts one by one
+XEN_CREDENTIALS=""
+XEN_CREDENTIALS+="10.10.10.1 admin1 password1"$'\n'
+XEN_CREDENTIALS+="10.10.10.2 admin2 password2"$'\n'
+XEN_CREDENTIALS+="10.10.10.3 admin3 'password with spaces'"$'\n'
+export XEN_CREDENTIALS
+```
+
+**docker-compose.yml with per-host credentials:**
+```yaml
+services:
+  xen-exporter:
+    image: ghcr.io/mikedombo/xen-exporter:latest
+    environment:
+      - XEN_HOST=10.10.10.1
+      - XEN_USER=root
+      - XEN_PASSWORD=fallback_password
+      - XEN_SSL_VERIFY=false
+      - |
+        XEN_CREDENTIALS=
+        10.10.10.1 admin1 password1
+        10.10.10.2 admin2 password2
+        10.10.10.3 admin3 'password with spaces'
+    ports:
+      - "9100:9100"
+```
 
 ## Example Setup
 
@@ -59,11 +94,6 @@ scrape_configs:
 A dashboard is [available here](https://grafana.com/grafana/dashboards/16588) (ID: 16588).
 
 ![Dashboard](https://grafana.com/api/dashboards/16588/images/12479/image)
-
-## Limitations
-
-- Pool mode requires same credentials for all hosts
-- Assumes poolmaster and hosts share the same username/password
 
 ## Changes from Upstream
 
