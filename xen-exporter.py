@@ -43,9 +43,12 @@ def lookup_sr_name_by_uuid(sr_uuid, session):
 
 
 def lookup_host_name(host_uuid, session):
-    return session.xenapi.host.get_name_label(
-        session.xenapi.host.get_by_uuid(host_uuid)
-    )
+    try:
+        return session.xenapi.host.get_name_label(
+            session.xenapi.host.get_by_uuid(host_uuid)
+        )
+    except XenAPI.XenAPI.Failure:
+        return host_uuid
 
 
 def lookup_sr_uuid_by_ref(sr_ref, session):
